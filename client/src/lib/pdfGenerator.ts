@@ -21,31 +21,89 @@ interface Quote {
 }
 
 export const generateQuotePDF = async (quote: Quote) => {
-  // Get company data for logo
-  const companies = await Company.list();
-  const company = companies.length > 0 ? companies[0] : null;
-  
-  // Calculate totals
-  const subtotal = quote.items.reduce((sum, item) => sum + (item.total || 0), 0);
-  const discountAmount = (subtotal * (quote.discount || 0)) / 100;
-  const total = subtotal - discountAmount;
-
-  // Generate HTML content based on template variant
-  const htmlContent = generateHTMLTemplate(quote, company, { subtotal, total, discountAmount });
-  
-  // Create a new window with the PDF content
-  const pdfWindow = window.open('', '_blank');
-  if (pdfWindow) {
-    pdfWindow.document.write(htmlContent);
-    pdfWindow.document.close();
+  try {
+    // Check if user can generate PDF
+    const accessResponse = await fetch('/api/check-pdf-access', {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
     
-    // Trigger print dialog
-    setTimeout(() => {
-      pdfWindow.print();
-    }, 500);
-  }
+    if (!accessResponse.ok) {
+      throw new Error('Failed to check PDF access');
+    }
+    
+    const accessData = await accessResponse.json();
+    
+    if (!accessData.canGenerate) {
+      // User has exceeded free trial and needs subscription
+      return { 
+        success: false, 
+        requiresSubscription: true,
+        freeDownloadsUsed: accessData.freeDownloadsUsed,
+        message: 'Você já utilizou seu download gratuito. Assine o plano para continuar gerando PDFs.'
+      };
+    }
+    
+    // Track the PDF download
+    const trackResponse = await fetch('/api/track-pdf-download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    if (!trackResponse.ok) {
+      const errorData = await trackResponse.json();
+      if (errorData.code === 'SUBSCRIPTION_REQUIRED') {
+        return { 
+          success: false, 
+          requiresSubscription: true,
+          freeDownloadsUsed: errorData.freeDownloadsUsed,
+          message: 'Assinatura necessária para gerar mais PDFs.'
+        };
+      }
+      throw new Error('Failed to track PDF download');
+    }
+    
+    const trackData = await trackResponse.json();
+    
+    // Get company data for logo
+    const companies = await Company.list();
+    const company = companies.length > 0 ? companies[0] : null;
+    
+    // Calculate totals
+    const subtotal = quote.items.reduce((sum, item) => sum + (item.total || 0), 0);
+    const discountAmount = (subtotal * (quote.discount || 0)) / 100;
+    const total = subtotal - discountAmount;
 
-  return { success: true, url: '#' };
+    // Generate HTML content based on template variant
+    const htmlContent = generateHTMLTemplate(quote, company, { subtotal, total, discountAmount });
+    
+    // Create a new window with the PDF content
+    const pdfWindow = window.open('', '_blank');
+    if (pdfWindow) {
+      pdfWindow.document.write(htmlContent);
+      pdfWindow.document.close();
+      
+      // Trigger print dialog
+      setTimeout(() => {
+        pdfWindow.print();
+      }, 500);
+    }
+
+    return { 
+      success: true, 
+      url: '#',
+      isFreeTrial: accessData.isFreeTrial,
+      freeDownloadsUsed: trackData.freeDownloadsUsed,
+      message: trackData.message
+    };
+    
+  } catch (error) {
+    console.error('Error generating PDF:', error);
+    return { 
+      success: false, 
+      message: 'Erro ao gerar PDF. Tente novamente.'
+    };
+  }
 };
 
 const getTemplateColors = (variant: string) => {

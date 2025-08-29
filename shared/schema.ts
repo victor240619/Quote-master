@@ -35,6 +35,8 @@ export const users = pgTable("users", {
   role: varchar("role").default("user"), // user, admin, banned, deleted
   stripeCustomerId: varchar("stripe_customer_id"),
   stripeSubscriptionId: varchar("stripe_subscription_id"),
+  freeDownloadsUsed: integer("free_downloads_used").default(0), // Track free PDF downloads
+  hasActiveSubscription: boolean("has_active_subscription").default(false), // Cache subscription status
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

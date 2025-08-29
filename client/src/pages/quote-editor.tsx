@@ -161,11 +161,37 @@ export default function QuoteEditor() {
     mutationFn: async () => {
       return await generateQuotePDF(quoteData);
     },
-    onSuccess: () => {
-      toast({
-        title: "PDF Gerado",
-        description: "O PDF do orçamento foi gerado com sucesso!",
-      });
+    onSuccess: (result) => {
+      if (result.success) {
+        const isFirstDownload = result.isFreeTrial && result.freeDownloadsUsed === 1;
+        toast({
+          title: "PDF Gerado",
+          description: isFirstDownload 
+            ? "PDF gerado! Esse foi seu download gratuito. Assine o plano para mais downloads."
+            : "O PDF do orçamento foi gerado com sucesso!",
+          variant: isFirstDownload ? "default" : "default",
+        });
+      } else if (result.requiresSubscription) {
+        toast({
+          title: "Assinatura Necessária",
+          description: result.message,
+          variant: "destructive",
+          action: (
+            <button 
+              onClick={() => window.location.href = '/subscription'}
+              className="bg-primary text-primary-foreground px-3 py-1 rounded text-sm"
+            >
+              Assinar Agora
+            </button>
+          )
+        });
+      } else {
+        toast({
+          title: "Erro",
+          description: result.message || "Erro ao gerar PDF do orçamento.",
+          variant: "destructive",
+        });
+      }
     },
     onError: () => {
       toast({
