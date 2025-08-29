@@ -22,6 +22,8 @@ export interface IStorage {
   updateUserStripeInfo(userId: string, stripeCustomerId: string, stripeSubscriptionId?: string): Promise<User>;
   listUsers(): Promise<User[]>;
   updateUser(userId: string, data: Partial<User>): Promise<User>;
+  incrementFreeDownloads(userId: string): Promise<User>;
+  updateSubscriptionStatus(userId: string, hasActiveSubscription: boolean): Promise<User>;
 
   // Company operations
   getCompanyByUser(userEmail: string): Promise<Company | undefined>;
@@ -220,6 +222,30 @@ export class DatabaseStorage implements IStorage {
     const sequenceStr = String(dailySequence).padStart(3, '0');
     
     return `QT-${year}${month}-${sequenceStr}`;
+  }
+
+  async incrementFreeDownloads(userId: string): Promise<User> {
+    const [user] = await db
+      .update(users)
+      .set({ 
+        freeDownloadsUsed: sql`${users.freeDownloadsUsed} + 1`,
+        updatedAt: new Date() 
+      })
+      .where(eq(users.id, userId))
+      .returning();
+    return user;
+  }
+
+  async updateSubscriptionStatus(userId: string, hasActiveSubscription: boolean): Promise<User> {
+    const [user] = await db
+      .update(users)
+      .set({ 
+        hasActiveSubscription,
+        updatedAt: new Date() 
+      })
+      .where(eq(users.id, userId))
+      .returning();
+    return user;
   }
 }
 

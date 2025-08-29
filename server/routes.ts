@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import express from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
@@ -12,6 +13,39 @@ if (!process.env.STRIPE_SECRET_KEY) {
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2025-08-27.basil",
 });
+
+// Middleware to check subscription status for premium features
+const requireSubscriptionOrFreeTrial = async (req: any, res: any, next: any) => {
+  try {
+    const userId = req.user.claims.sub;
+    const user = await storage.getUser(userId);
+    
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Check if user has active subscription
+    if (user.hasActiveSubscription) {
+      return next();
+    }
+
+    // Check if user still has free downloads available (first download is free)
+    if (user.freeDownloadsUsed === 0) {
+      return next();
+    }
+
+    // User has used free trial and doesn't have active subscription
+    return res.status(402).json({ 
+      message: "Subscription required",
+      code: "SUBSCRIPTION_REQUIRED",
+      freeDownloadsUsed: user.freeDownloadsUsed 
+    });
+    
+  } catch (error) {
+    console.error("Error checking subscription:", error);
+    res.status(500).json({ message: "Failed to check subscription status" });
+  }
+};
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
@@ -335,6 +369,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Check if user can generate PDF (subscription or free trial)
+  app.get('/api/check-pdf-access', isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const canGenerate = user.hasActiveSubscription || user.freeDownloadsUsed === 0;
+      
+      res.json({ 
+        canGenerate,
+        hasActiveSubscription: user.hasActiveSubscription,
+        freeDownloadsUsed: user.freeDownloadsUsed,
+        isFreeTrial: user.freeDownloadsUsed === 0 && !user.hasActiveSubscription
+      });
+    } catch (error) {
+      console.error("Error checking PDF access:", error);
+      res.status(500).json({ message: "Failed to check PDF access" });
+    }
+  });
+
+  // Endpoint to track PDF generation (increment free downloads counter)
+  app.post('/api/track-pdf-download', isAuthenticated, requireSubscriptionOrFreeTrial, async (req: any, res) => {
+    try {
+      const userId = req.user.claims.sub;
+      const user = await storage.getUser(userId);
+      
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // If it's a free trial user (first download), increment the counter
+      if (!user.hasActiveSubscription && user.freeDownloadsUsed === 0) {
+        await storage.incrementFreeDownloads(userId);
+        res.json({ 
+          success: true, 
+          message: "Free trial used. Subscribe to continue generating PDFs.",
+          freeDownloadsUsed: 1
+        });
+      } else {
+        res.json({ 
+          success: true, 
+          message: "PDF generated successfully",
+          freeDownloadsUsed: user.freeDownloadsUsed
+        });
+      }
+    } catch (error) {
+      console.error("Error tracking PDF download:", error);
+      res.status(500).json({ message: "Failed to track PDF download" });
+    }
+  });
+
   // Stripe subscription routes
   app.post('/api/get-or-create-subscription', isAuthenticated, async (req: any, res) => {
     try {
@@ -411,6 +500,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Portal error:", error);
       res.status(500).json({ error: error.message });
     }
+  });
+
+  // Stripe webhook endpoint to handle subscription events  
+  app.use('/webhook/stripe', express.raw({ type: 'application/json' }));
+  app.post('/webhook/stripe', async (req, res) => {
+    const sig = req.headers['stripe-signature'];
+    let event;
+
+    try {
+      event = stripe.webhooks.constructEvent(req.body, sig as string, process.env.STRIPE_WEBHOOK_SECRET || '');
+    } catch (err: any) {
+      console.log(`Webhook signature verification failed.`, err.message);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    // Handle the event
+    switch (event.type) {
+      case 'customer.subscription.created':
+      case 'customer.subscription.updated':
+        const subscription = event.data.object as any;
+        try {
+          const users = await storage.listUsers();
+          const user = users.find(u => u.stripeCustomerId === subscription.customer);
+          
+          if (user) {
+            const isActive = ['active', 'trialing'].includes(subscription.status);
+            await storage.updateSubscriptionStatus(user.id, isActive);
+            console.log(`Updated subscription status for user ${user.id}: ${isActive}`);
+          }
+        } catch (error) {
+          console.error('Error updating subscription status:', error);
+        }
+        break;
+
+      case 'invoice.payment_succeeded':
+        const invoice = event.data.object as any;
+        if (invoice.subscription) {
+          try {
+            const users = await storage.listUsers();
+            const user = users.find(u => u.stripeSubscriptionId === invoice.subscription);
+            
+            if (user) {
+              await storage.updateSubscriptionStatus(user.id, true);
+              console.log(`Activated subscription for user ${user.id} after payment`);
+            }
+          } catch (error) {
+            console.error('Error activating subscription after payment:', error);
+          }
+        }
+        break;
+
+      default:
+        console.log(`Unhandled event type ${event.type}`);
+    }
+
+    res.json({ received: true });
   });
 
   const httpServer = createServer(app);
