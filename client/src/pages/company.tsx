@@ -85,8 +85,12 @@ export default function CompanyPage() {
   }, [company, form]);
 
   const createMutation = useMutation({
-    mutationFn: (data: CompanyForm) => Company.create(data),
-    onSuccess: () => {
+    mutationFn: (data: CompanyForm) => {
+      console.log("Creating company with data:", data);
+      return Company.create(data);
+    },
+    onSuccess: (result) => {
+      console.log("Company created successfully:", result);
       queryClient.invalidateQueries({ queryKey: ["companies", "me"] });
       toast({
         title: "Sucesso",
@@ -95,6 +99,7 @@ export default function CompanyPage() {
       setIsEditing(false);
     },
     onError: (error) => {
+      console.error("Error creating company:", error);
       if (isUnauthorizedError(error as Error)) {
         toast({
           title: "Unauthorized",
@@ -108,7 +113,7 @@ export default function CompanyPage() {
       }
       toast({
         title: "Erro",
-        description: "Falha ao criar empresa. Tente novamente.",
+        description: `Falha ao criar empresa: ${error.message || "Tente novamente."}`,
         variant: "destructive",
       });
     },
@@ -145,9 +150,14 @@ export default function CompanyPage() {
   });
 
   const handleSubmit = (data: CompanyForm) => {
+    console.log("Form submitted with data:", data);
+    console.log("Form errors:", form.formState.errors);
+    
     if (company) {
+      console.log("Updating existing company...");
       updateMutation.mutate(data);
     } else {
+      console.log("Creating new company...");
       createMutation.mutate(data);
     }
   };
@@ -314,6 +324,12 @@ export default function CompanyPage() {
                     disabled={createMutation.isPending || updateMutation.isPending}
                     className={`flex items-center gap-2 ${!company ? "bg-primary hover:bg-primary/90" : ""}`}
                     data-testid="button-save-company"
+                    onClick={(e) => {
+                      console.log("Button clicked!");
+                      console.log("Form values:", form.getValues());
+                      console.log("Form state:", form.formState);
+                      console.log("Is valid:", form.formState.isValid);
+                    }}
                   >
                     <Save className="w-4 h-4" />
                     {(createMutation.isPending || updateMutation.isPending) 
