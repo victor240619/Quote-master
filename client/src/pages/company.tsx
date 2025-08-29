@@ -20,7 +20,7 @@ const companySchema = insertCompanySchema.extend({
     .min(3, "Nome da empresa deve ter pelo menos 3 caracteres")
     .max(100, "Nome da empresa deve ter no máximo 100 caracteres")
     .regex(/^[A-Za-zÀ-ÿ0-9\s\-\.&]+$/, "Nome deve conter apenas letras, números e caracteres básicos"),
-  logoUrl: z.string().url("URL inválida").optional().or(z.literal("")),
+  logoUrl: z.string().optional().refine((val) => !val || z.string().url().safeParse(val).success, "URL inválida"),
 });
 
 type CompanyForm = z.infer<typeof companySchema>;
@@ -327,8 +327,16 @@ export default function CompanyPage() {
                     onClick={(e) => {
                       console.log("Button clicked!");
                       console.log("Form values:", form.getValues());
-                      console.log("Form state:", form.formState);
+                      console.log("Form errors:", form.formState.errors);
                       console.log("Is valid:", form.formState.isValid);
+                      
+                      // Force trigger validation
+                      form.trigger().then((isValid) => {
+                        console.log("Manual validation result:", isValid);
+                        if (!isValid) {
+                          console.log("Validation errors after trigger:", form.formState.errors);
+                        }
+                      });
                     }}
                   >
                     <Save className="w-4 h-4" />
