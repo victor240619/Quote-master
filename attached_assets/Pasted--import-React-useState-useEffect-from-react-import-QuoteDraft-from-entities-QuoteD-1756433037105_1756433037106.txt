@@ -1,0 +1,235 @@
+
+import React, { useState, useEffect } from "react";
+import { QuoteDraft } from "@/entities/QuoteDraft";
+import { Company } from "@/entities/Company";
+import { User } from "@/entities/User";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import {
+  FileText,
+  Plus,
+  Download,
+  Eye,
+  Edit3,
+  DollarSign,
+  Calendar,
+  TrendingUp,
+  AlertTriangle,
+  CheckCircle2 // Added CheckCircle2 for the success alert
+} from "lucide-react";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { Alert, AlertDescription } from "@/components/ui/alert"; // Added Alert components
+
+import StatsGrid from "../components/dashboard/StatsGrid";
+import RecentQuotes from "../components/dashboard/RecentQuotes";
+import SubscriptionAlert from "../components/dashboard/SubscriptionAlert";
+
+export default function Dashboard() {
+  const [quotes, setQuotes] = useState([]);
+  const [company, setCompany] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
+    totalQuotes: 0,
+    totalValue: 0,
+    thisMonth: 0,
+    finalizedQuotes: 0
+  });
+  const [paymentMessage, setPaymentMessage] = useState(''); // New state for payment message
+
+  useEffect(() => {
+    checkSubscriptionAndLoadData();
+
+    // Checar se o usuário veio de um pagamento bem-sucedido
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('payment') === 'success') {
+      setPaymentMessage('Pagamento recebido com sucesso! Sua assinatura está sendo ativada.');
+      // Limpa a URL para não mostrar a mensagem novamente ao recarregar
+      window.history.replaceState({}, document.title, window.location.pathname);
+      // Recarrega os dados para refletir o novo status da assinatura
+      // Give some time for the webhook to update the subscription status on the backend
+      setTimeout(checkSubscriptionAndLoadData, 3000); 
+    }
+    
+    // Check for Stripe session success (alternative URL parameter)
+    const sessionId = urlParams.get('session_id');
+    if (sessionId) {
+      setPaymentMessage('Pagamento processado com sucesso! Atualizando dados da assinatura...');
+      window.history.replaceState({}, document.title, window.location.pathname);
+      // Give more time for webhook to process
+      setTimeout(checkSubscriptionAndLoadData, 5000);
+    }
+  }, []);
+
+  const checkSubscriptionAndLoadData = async () => {
+    try {
+      const currentUser = await User.me();
+      
+      // Get user's quotes (filter by current user)
+      const quotesData = await QuoteDraft.filter({ created_by: currentUser.email }, '-created_date', 10);
+      
+      // Get user's company (filter by current user)
+      const companyData = await Company.filter({ created_by: currentUser.email });
+
+      setQuotes(quotesData);
+      
+      if (companyData.length > 0) {
+        setCompany(companyData[0]);
+        
+        // Admin users bypass subscription check
+        if (currentUser.role === 'admin') {
+          // Admin has full access, continue loading
+        } else if (!companyData[0].subscription_status || companyData[0].subscription_status !== 'active') {
+          window.location.href = createPageUrl("Onboarding");
+          return;
+        }
+      } else if (currentUser.role !== 'admin') {
+        // Non-admin users without company record go to onboarding
+        window.location.href = createPageUrl("Onboarding");
+        return;
+      }
+
+      // Calculate stats for current user only
+      const allUserQuotes = await QuoteDraft.filter({ created_by: currentUser.email });
+      const totalValue = allUserQuotes.reduce((sum, quote) => sum + (quote.total || 0), 0);
+      const thisMonth = new Date().getMonth();
+      const thisMonthQuotes = allUserQuotes.filter(quote => 
+        new Date(quote.created_date).getMonth() === thisMonth
+      );
+      const thisMonthValue = thisMonthQuotes.reduce((sum, quote) => sum + (quote.total || 0), 0);
+      const finalizedCount = allUserQuotes.filter(quote => quote.status === 'finalized').length;
+
+      setStats({
+        totalQuotes: allUserQuotes.length,
+        totalValue,
+        thisMonth: thisMonthValue,
+        finalizedQuotes: finalizedCount
+      });
+    } catch (error) {
+      console.error("Error loading dashboard:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const isBlocked = company?.subscription_status === 'blocked';
+  const isPastDue = company?.subscription_status === 'past_due';
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-white p-6">
+      <div className="max-w-7xl mx-auto space-y-8">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+            <p className="text-gray-500 mt-2">
+              Gerencie seus orçamentos e acompanhe sua performance
+            </p>
+          </div>
+          
+          <div className="flex gap-3">
+            <Link to={createPageUrl("Editor")}>
+              <Button 
+                className="bg-blue-600 hover:bg-blue-700 text-white shadow-lg hover:shadow-xl transition-all duration-200"
+                disabled={isBlocked}
+              >
+                <Plus className="w-5 h-5 mr-2" />
+                Novo Orçamento
+              </Button>
+            </Link>
+          </div>
+        </div>
+
+        {paymentMessage && (
+          <Alert className="border-green-200 bg-green-50">
+            <CheckCircle2 className="h-4 w-4 text-green-700" />
+            <AlertDescription className="text-green-800">
+              {paymentMessage}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {(isBlocked || isPastDue) && (
+          <SubscriptionAlert 
+            status={company.subscription_status}
+            pendingBlockDate={company.pending_block_date}
+          />
+        )}
+
+        <StatsGrid stats={stats} loading={loading} />
+
+        <div className="grid lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2">
+            <RecentQuotes 
+              quotes={quotes}
+              loading={loading}
+              onRefresh={checkSubscriptionAndLoadData}
+              isBlocked={isBlocked}
+            />
+          </div>
+          
+          <div className="space-y-6">
+            <Card className="border-0 shadow-lg">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5 text-blue-600" />
+                  Resumo do Mês
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-gray-600">Orçamentos criados</span>
+                  <span className="font-semibold">{quotes.length}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-gray-600">Valor total</span>
+                  <span className="font-semibold text-green-600">
+                    R$ {stats.thisMonth.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-gray-600">Finalizados</span>
+                  <Badge variant="outline" className="bg-blue-50 text-blue-700">
+                    {stats.finalizedQuotes}
+                  </Badge>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-0 shadow-lg">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg font-semibold">Ações Rápidas</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Link to={createPageUrl("Editor")}>
+                  <Button 
+                    variant="outline" 
+                    className="w-full justify-start gap-3 hover:bg-blue-50 hover:border-blue-200"
+                    disabled={isBlocked}
+                  >
+                    <FileText className="w-4 h-4" />
+                    Criar Orçamento
+                  </Button>
+                </Link>
+                <Link to={createPageUrl("Settings")}>
+                  <Button variant="outline" className="w-full justify-start gap-3 hover:bg-gray-50">
+                    <Edit3 className="w-4 h-4" />
+                    Configurar Logo
+                  </Button>
+                </Link>
+                <Link to={createPageUrl("Subscription")}>
+                  <Button variant="outline" className="w-full justify-start gap-3 hover:bg-gray-50">
+                    <DollarSign className="w-4 h-4" />
+                    Gerenciar Assinatura
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

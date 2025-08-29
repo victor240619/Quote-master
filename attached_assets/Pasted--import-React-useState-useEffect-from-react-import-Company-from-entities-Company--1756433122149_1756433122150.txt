@@ -1,0 +1,282 @@
+
+import React, { useState, useEffect } from "react";
+import { Company } from "@/entities/Company";
+import { User } from "@/entities/User";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Upload, Building2, Save, Image as ImageIcon } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+
+export default function Settings() {
+  const [company, setCompany] = useState({
+    name: '',
+    logo_url: ''
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    loadCompanyData();
+  }, []);
+
+  const loadCompanyData = async () => {
+    try {
+      const currentUser = await User.me();
+      // Get only current user's company
+      const companies = await Company.filter({ created_by: currentUser.email });
+      if (companies.length > 0) {
+        setCompany(companies[0]);
+      }
+    } catch (error) {
+      console.error("Error loading company:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      setMessage('');
+      setError('');
+
+      const currentUser = await User.me();
+      const existing = await Company.filter({ created_by: currentUser.email });
+      
+      if (existing.length > 0) {
+        await Company.update(existing[0].id, {
+          name: company.name,
+          logo_url: company.logo_url
+        });
+      } else {
+        await Company.create({
+          name: company.name,
+          logo_url: company.logo_url,
+          created_by: currentUser.email,
+          subscription_status: currentUser.role === 'admin' ? 'active' : 'inactive'
+        });
+      }
+
+      setMessage('Configurações salvas com sucesso!');
+    } catch (error) {
+      setError('Erro ao salvar configurações');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLogoUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Check file size (2MB limit)
+    const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024; 
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setError('O tamanho do arquivo excede o limite de 2MB.');
+      return;
+    }
+
+    try {
+      setUploadingLogo(true);
+      setError('');
+
+      // In a real implementation, this would upload to your backend
+      // For now, we'll simulate it with a placeholder
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setCompany(prev => ({
+          ...prev,
+          logo_url: e.target?.result
+        }));
+        setUploadingLogo(false);
+        setMessage('Logo carregado! Não esqueça de salvar as configurações.');
+      };
+      reader.readAsDataURL(file);
+      
+    } catch (error) {
+      setError('Erro ao fazer upload do logo');
+      setUploadingLogo(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-white p-6">
+      <div className="max-w-4xl mx-auto space-y-8">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Configurações</h1>
+          <p className="text-gray-500 mt-2">
+            Configure os dados da sua empresa e personalize seus orçamentos
+          </p>
+        </div>
+
+        {message && (
+          <Alert className="border-green-200 bg-green-50">
+            <AlertDescription className="text-green-800">{message}</AlertDescription>
+          </Alert>
+        )}
+
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        <div className="space-y-8">
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="border-b border-gray-100">
+              <CardTitle className="flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-blue-600" />
+                Dados da Empresa
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-6 space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="company-name">Nome da Empresa</Label>
+                <Input
+                  id="company-name"
+                  value={company.name}
+                  onChange={(e) => setCompany(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="Digite o nome da sua empresa"
+                  className="text-lg"
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="border-b border-gray-100">
+              <CardTitle className="flex items-center gap-2">
+                <ImageIcon className="w-5 h-5 text-blue-600" />
+                Logo da Empresa
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-6">
+              <div className="grid lg:grid-cols-2 gap-8">
+                <div className="space-y-6">
+                  <div>
+                    <Label htmlFor="logo-upload">Carregar Logo</Label>
+                    <div className="mt-2">
+                      <input
+                        id="logo-upload"
+                        type="file"
+                        accept="image/*"
+                        onChange={handleLogoUpload}
+                        className="hidden"
+                      />
+                      <Button
+                        variant="outline"
+                        onClick={() => document.getElementById('logo-upload')?.click()}
+                        disabled={uploadingLogo}
+                        className="w-full gap-2"
+                      >
+                        <Upload className="w-4 h-4" />
+                        {uploadingLogo ? 'Carregando...' : 'Selecionar Arquivo'}
+                      </Button>
+                    </div>
+                    <div className="mt-3 space-y-2 text-sm text-gray-500">
+                      <p>• Formatos aceitos: PNG, JPG, SVG</p>
+                      <p>• Tamanho recomendado: 300x100px</p>
+                      <p>• Tamanho máximo: 2MB</p>
+                    </div>
+                  </div>
+
+                  {company.logo_url && (
+                    <div className="space-y-3">
+                      <Label>Informações do Logo</Label>
+                      <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                        <div className="flex justify-between">
+                          <span className="font-medium">Status:</span>
+                          <span className="text-green-600 font-semibold">✓ Carregado</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-medium">Formato:</span>
+                          <span className="uppercase">{company.logo_url.split('.').pop()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="font-medium">Será usado em:</span>
+                          <span>Orçamentos em PDF</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Preview Area - Maior */}
+                <div className="space-y-4">
+                  <Label>Visualização do Logo</Label>
+                  {company.logo_url ? (
+                    <div className="space-y-4">
+                      {/* Grande preview */}
+                      <div className="w-full h-64 border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center bg-white shadow-inner">
+                        <img
+                          src={company.logo_url}
+                          alt="Logo da empresa"
+                          className="max-w-full max-h-full object-contain"
+                          style={{ maxWidth: '90%', maxHeight: '90%' }}
+                        />
+                      </div>
+
+                      {/* Preview como aparecerá no PDF */}
+                      <div className="space-y-2">
+                        <Label className="text-sm">Como aparecerá no orçamento:</Label>
+                        <div className="bg-gradient-to-r from-blue-600 to-blue-700 p-6 rounded-lg">
+                          <div className="bg-white rounded-lg p-6 flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                              <img
+                                src={company.logo_url}
+                                alt="Logo"
+                                className="h-16 w-auto object-contain"
+                              />
+                              <div>
+                                <h3 className="font-bold text-lg text-gray-900">{company.name}</h3>
+                                <p className="text-gray-600">Empresa</p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <h2 className="text-2xl font-bold text-blue-600">ORÇAMENTO</h2>
+                              <p className="text-gray-500">Código: QT-12345</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="w-full h-64 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center bg-gray-50 text-gray-500">
+                      <ImageIcon className="w-16 h-16 mb-4" />
+                      <p className="text-lg font-medium">Nenhum logo carregado</p>
+                      <p className="text-sm mt-1">Selecione um arquivo para visualizar</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="flex justify-end">
+            <Button
+              onClick={handleSave}
+              disabled={saving || !company.name.trim()}
+              className="bg-blue-600 hover:bg-blue-700 px-8"
+            >
+              <Save className="w-4 h-4 mr-2" />
+              {saving ? 'Salvando...' : 'Salvar Configurações'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

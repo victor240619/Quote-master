@@ -1,0 +1,398 @@
+import React, { useState, useEffect } from "react";
+import { User } from "@/entities/User";
+import { Company } from "@/entities/Company";
+import { QuoteDraft } from "@/entities/QuoteDraft";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { 
+  Shield, 
+  Users, 
+  FileText, 
+  DollarSign,
+  UserX,
+  Ban,
+  CheckCircle2,
+  AlertTriangle,
+  Crown,
+  Trash2,
+  Eye
+} from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+export default function AdminPanel() {
+  const [currentUser, setCurrentUser] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [companies, setCompanies] = useState([]);
+  const [quotes, setQuotes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
+    totalUsers: 0,
+    activeSubscriptions: 0,
+    totalRevenue: 0,
+    totalQuotes: 0
+  });
+  const [actionDialog, setActionDialog] = useState({ open: false, user: null, action: null });
+  const [processing, setProcessing] = useState(false);
+
+  useEffect(() => {
+    checkAdminAccess();
+    loadAdminData();
+  }, []);
+
+  const checkAdminAccess = async () => {
+    try {
+      const user = await User.me();
+      if (user.role !== 'admin') {
+        window.location.href = '/';
+        return;
+      }
+      setCurrentUser(user);
+    } catch (error) {
+      window.location.href = '/';
+    }
+  };
+
+  const loadAdminData = async () => {
+    try {
+      const [allUsers, allCompanies, allQuotes] = await Promise.all([
+        User.list(),
+        Company.list(),
+        QuoteDraft.list()
+      ]);
+
+      setUsers(allUsers);
+      setCompanies(allCompanies);
+      setQuotes(allQuotes);
+
+      // Calculate stats
+      const activeSubscriptions = allCompanies.filter(c => c.subscription_status === 'active').length;
+      const totalRevenue = activeSubscriptions * 30; // R$ 30/mês
+
+      setStats({
+        totalUsers: allUsers.length,
+        activeSubscriptions,
+        totalRevenue,
+        totalQuotes: allQuotes.length
+      });
+    } catch (error) {
+      console.error("Error loading admin data:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUserAction = async (user, action) => {
+    setActionDialog({ open: true, user, action });
+  };
+
+  const confirmUserAction = async () => {
+    if (!actionDialog.user) return;
+
+    try {
+      setProcessing(true);
+      const { user, action } = actionDialog;
+
+      if (action === 'delete') {
+        // In a real app, you'd need a proper delete endpoint
+        // For now, we'll simulate by updating the user status
+        await User.update(user.id, { 
+          role: 'deleted',
+          email: `deleted_${Date.now()}_${user.email}`
+        });
+      } else if (action === 'ban') {
+        await User.update(user.id, { role: 'banned' });
+        
+        // Also block their company
+        const userCompany = companies.find(c => c.created_by === user.email);
+        if (userCompany) {
+          await Company.update(userCompany.id, {
+            subscription_status: 'blocked',
+            blocked_until: null
+          });
+        }
+      } else if (action === 'unban') {
+        await User.update(user.id, { role: 'user' });
+        
+        // Restore their company
+        const userCompany = companies.find(c => c.created_by === user.email);
+        if (userCompany) {
+          await Company.update(userCompany.id, {
+            subscription_status: 'active',
+            blocked_until: null
+          });
+        }
+      }
+
+      setActionDialog({ open: false, user: null, action: null });
+      loadAdminData();
+    } catch (error) {
+      console.error("Error performing user action:", error);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const getUserCompany = (userEmail) => {
+    return companies.find(c => c.created_by === userEmail);
+  };
+
+  const getUserStatus = (user) => {
+    if (user.role === 'admin') return { text: 'Admin', variant: 'default', color: 'text-blue-600' };
+    if (user.role === 'banned') return { text: 'Banido', variant: 'destructive', color: 'text-red-600' };
+    if (user.role === 'deleted') return { text: 'Excluído', variant: 'secondary', color: 'text-gray-600' };
+    
+    const company = getUserCompany(user.email);
+    if (!company) return { text: 'Sem Empresa', variant: 'secondary', color: 'text-gray-600' };
+    
+    switch (company.subscription_status) {
+      case 'active': return { text: 'Ativo', variant: 'default', color: 'text-green-600' };
+      case 'past_due': return { text: 'Em Atraso', variant: 'destructive', color: 'text-orange-600' };
+      case 'blocked': return { text: 'Bloqueado', variant: 'destructive', color: 'text-red-600' };
+      default: return { text: 'Inativo', variant: 'secondary', color: 'text-gray-600' };
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-white p-6">
+      <div className="max-w-7xl mx-auto space-y-8">
+        {/* Header */}
+        <div className="text-center">
+          <div className="w-16 h-16 bg-gradient-to-br from-yellow-500 to-orange-600 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-xl">
+            <Crown className="w-8 h-8 text-white" />
+          </div>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Painel Administrativo</h1>
+          <p className="text-gray-600">
+            Bem-vindo, {currentUser?.full_name} • Gerencie usuários e monitore o sistema
+          </p>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <Card className="border-0 shadow-lg">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Total de Usuários</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-2">{stats.totalUsers}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-blue-50">
+                  <Users className="w-6 h-6 text-blue-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-lg">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Assinaturas Ativas</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-2">{stats.activeSubscriptions}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-green-50">
+                  <CheckCircle2 className="w-6 h-6 text-green-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-lg">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Receita Mensal</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-2">
+                    R$ {stats.totalRevenue.toLocaleString('pt-BR')}
+                  </p>
+                </div>
+                <div className="p-3 rounded-lg bg-purple-50">
+                  <DollarSign className="w-6 h-6 text-purple-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-lg">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-500">Orçamentos Criados</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-2">{stats.totalQuotes}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-orange-50">
+                  <FileText className="w-6 h-6 text-orange-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Admin Privileges Alert */}
+        <Alert className="border-blue-200 bg-blue-50">
+          <Shield className="h-4 w-4" />
+          <AlertDescription className="text-blue-800">
+            <strong>Privilégios de Administrador:</strong> Você pode usar o sistema de orçamentos sem limitações de pagamento e gerenciar todos os usuários.
+          </AlertDescription>
+        </Alert>
+
+        {/* Users Management */}
+        <Card className="border-0 shadow-lg">
+          <CardHeader className="border-b border-gray-100">
+            <CardTitle className="flex items-center gap-2">
+              <Users className="w-5 h-5 text-blue-600" />
+              Gerenciamento de Usuários
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-gray-50">
+                    <TableHead>Usuário</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Cadastro</TableHead>
+                    <TableHead>Orçamentos</TableHead>
+                    <TableHead className="text-right">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {users.map((user) => {
+                    const userQuotes = quotes.filter(q => q.created_by === user.email);
+                    const status = getUserStatus(user);
+                    
+                    return (
+                      <TableRow key={user.id} className="hover:bg-gray-50">
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            {user.role === 'admin' && <Crown className="w-4 h-4 text-yellow-500" />}
+                            <span className="font-medium">{user.full_name}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">{user.email}</TableCell>
+                        <TableCell>
+                          <Badge variant={status.variant} className={status.color}>
+                            {status.text}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {format(new Date(user.created_date), "dd/MM/yyyy", { locale: ptBR })}
+                        </TableCell>
+                        <TableCell>{userQuotes.length}</TableCell>
+                        <TableCell className="text-right">
+                          {user.role !== 'admin' && (
+                            <div className="flex gap-2 justify-end">
+                              {user.role === 'banned' ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleUserAction(user, 'unban')}
+                                  className="text-green-600 border-green-600 hover:bg-green-50"
+                                >
+                                  <CheckCircle2 className="w-4 h-4 mr-1" />
+                                  Desbanir
+                                </Button>
+                              ) : (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleUserAction(user, 'ban')}
+                                    className="text-orange-600 border-orange-600 hover:bg-orange-50"
+                                  >
+                                    <Ban className="w-4 h-4 mr-1" />
+                                    Banir
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleUserAction(user, 'delete')}
+                                    className="text-red-600 border-red-600 hover:bg-red-50"
+                                  >
+                                    <Trash2 className="w-4 h-4 mr-1" />
+                                    Excluir
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Action Confirmation Dialog */}
+        <Dialog open={actionDialog.open} onOpenChange={() => setActionDialog({ open: false, user: null, action: null })}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-orange-500" />
+                Confirmar Ação
+              </DialogTitle>
+              <DialogDescription>
+                {actionDialog.action === 'delete' && 
+                  `Tem certeza que deseja EXCLUIR o usuário ${actionDialog.user?.full_name}? Esta ação não pode ser desfeita.`}
+                {actionDialog.action === 'ban' && 
+                  `Tem certeza que deseja BANIR o usuário ${actionDialog.user?.full_name}? Ele perderá acesso ao sistema.`}
+                {actionDialog.action === 'unban' && 
+                  `Tem certeza que deseja DESBANIR o usuário ${actionDialog.user?.full_name}? Ele terá acesso restaurado.`}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setActionDialog({ open: false, user: null, action: null })}
+                disabled={processing}
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant={actionDialog.action === 'delete' ? 'destructive' : 'default'}
+                onClick={confirmUserAction}
+                disabled={processing}
+              >
+                {processing ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                    Processando...
+                  </>
+                ) : (
+                  <>
+                    {actionDialog.action === 'delete' && 'Excluir'}
+                    {actionDialog.action === 'ban' && 'Banir'}
+                    {actionDialog.action === 'unban' && 'Desbanir'}
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </div>
+  );
+}

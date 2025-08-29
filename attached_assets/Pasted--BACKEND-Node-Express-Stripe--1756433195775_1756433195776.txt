@@ -1,0 +1,143 @@
+// ================================
+// BACKEND (Node + Express + Stripe)
+// ================================
+import express from "express";
+import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
+import { createServer } from "http";
+import Stripe from "stripe";
+
+// Ajuste __dirname (ESM)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+const server = createServer(app);
+
+app.use(cors());
+app.use(express.json());
+
+// Stripe
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+// JWT fake
+app.get("/token", (req, res) => {
+  return res.json({ access_token: "fake-jwt-token" });
+});
+
+// Checkout
+app.post("/api/v1/stripe/checkout", async (req, res) => {
+  try {
+    const { email, name } = req.body;
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      customer_email: email,
+      line_items: [
+        {
+          price_data: {
+            currency: "brl",
+            product_data: {
+              name: "Assinatura Premium - Quote Master",
+              description: `Assinatura vinculada a ${name}`,
+            },
+            unit_amount: 3900, // R$39
+          },
+          quantity: 1,
+        },
+      ],
+      mode: "subscription",
+      success_url: "/sucesso",
+      cancel_url: "/cancelado",
+    });
+
+    res.json({ checkout_url: session.url });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ detail: error.message });
+  }
+});
+
+// Portal
+app.post("/api/v1/stripe/create-customer-portal", async (req, res) => {
+  try {
+    const { customerId } = req.body;
+    const portalSession = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: "/",
+    });
+    res.json({ portal_url: portalSession.url });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ detail: error.message });
+  }
+});
+
+// ================================
+// FRONTEND (React + Vite)
+// ================================
+import { createServer as createViteServer } from "vite";
+
+async function start() {
+  const vite = await createViteServer({
+    server: { middlewareMode: true },
+    appType: "custom",
+  });
+
+  // Usa Vite como middleware
+  app.use(vite.middlewares);
+
+  const PORT = process.env.PORT || 3000;
+  server.listen(PORT, () => {
+    console.log(`🚀 App rodando em http://localhost:${PORT}`);
+  });
+}
+
+start();
+import React, { useState } from "react";
+
+export default function App() {
+  const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+
+  const subscribe = async () => {
+    setLoading(true);
+    const tokenRes = await fetch("/token");
+    const { access_token } = await tokenRes.json();
+
+    const res = await fetch("/api/v1/stripe/checkout", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${access_token}`,
+      },
+      body: JSON.stringify({ email, name }),
+    });
+
+    const data = await res.json();
+    window.location.href = data.checkout_url;
+  };
+
+  return (
+    <div style={{ fontFamily: "sans-serif", textAlign: "center", marginTop: "50px" }}>
+      <h1>Quote Master</h1>
+      <input
+        type="text"
+        placeholder="Seu nome"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      /><br /><br />
+      <input
+        type="email"
+        placeholder="Seu e-mail"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+      /><br /><br />
+      <button onClick={subscribe} disabled={loading}>
+        {loading ? "Processando..." : "Assinar R$39/mês"}
+      </button>
+    </div>
+  );
+}

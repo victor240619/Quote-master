@@ -1,0 +1,306 @@
+
+import React, { useState, useEffect } from "react";
+import { Company } from "@/entities/Company";
+import { User } from "@/entities/User";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  CreditCard,
+  CheckCircle2,
+  AlertTriangle,
+  Calendar,
+  DollarSign,
+  Shield
+} from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+
+export default function Subscription() {
+  const [company, setCompany] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [processing, setProcessing] = useState(false);
+  const [user, setUser] = useState(null); // Add user state
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    try {
+      const currentUser = await User.me();
+      setUser(currentUser); // Set the user state
+      // Get only current user's company
+      const companies = await Company.filter({ created_by: currentUser.email });
+      if (companies.length > 0) {
+        setCompany(companies[0]);
+      }
+    } catch (error) {
+      console.error("Error loading data:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getStatusInfo = () => {
+    if (!company) return null;
+
+    const statusConfig = {
+      active: {
+        title: "Assinatura Ativa",
+        description: "Sua conta está funcionando normalmente",
+        color: "text-green-600",
+        bgColor: "bg-green-50",
+        icon: CheckCircle2,
+        badge: { text: "Ativo", variant: "default" }
+      },
+      past_due: {
+        title: "Pagamento em Atraso",
+        description: "Seu último pagamento não foi processado. Atualize seus dados de pagamento.",
+        color: "text-orange-600",
+        bgColor: "bg-orange-50",
+        icon: AlertTriangle,
+        badge: { text: "Em Atraso", variant: "destructive" }
+      },
+      blocked: {
+        title: "Conta Bloqueada",
+        description: "Sua conta foi bloqueada devido ao não pagamento. Regularize para continuar usando.",
+        color: "text-red-600",
+        bgColor: "bg-red-50",
+        icon: AlertTriangle,
+        badge: { text: "Bloqueado", variant: "destructive" }
+      },
+      cancelled: {
+        title: "Assinatura Cancelada",
+        description: "Sua assinatura foi cancelada. Reative para continuar usando o sistema.",
+        color: "text-gray-600",
+        bgColor: "bg-gray-50",
+        icon: AlertTriangle,
+        badge: { text: "Cancelado", variant: "secondary" }
+      }
+    };
+
+    return statusConfig[company.subscription_status] || statusConfig.active;
+  };
+
+  const handleSubscription = async () => {
+    if (!user?.email) {
+      alert("Usuário não identificado. Faça login novamente.");
+      return;
+    }
+
+    setProcessing(true);
+
+    try {
+      // Get auth token from the new /token endpoint
+      let authToken = localStorage.getItem('jwt_token');
+      if (!authToken) {
+        const tokenResponse = await fetch('/token');
+        if (!tokenResponse.ok) throw new Error("Falha ao obter token de autenticação");
+        const tokenData = await tokenResponse.json();
+        authToken = tokenData.access_token;
+        localStorage.setItem('jwt_token', authToken);
+      }
+
+      console.log("Usando token JWT para o portal do cliente.");
+
+      // SECURITY NOTE: This endpoint (/api/v1/stripe/create-customer-portal) is now protected by JWT
+      const response = await fetch('/api/v1/stripe/create-customer-portal', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Erro HTTP ${response.status}`);
+      }
+
+      const session = await response.json();
+
+      // IMPORTANT: Changed from session.url to session.portal_url based on your new backend
+      if (session.portal_url) {
+        window.location.href = session.portal_url;
+      } else {
+        throw new Error('URL do portal não recebida do servidor');
+      }
+
+    } catch (error) {
+      console.error("Error creating customer portal session:", error);
+      alert(`Erro: ${error.message}`);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+      </div>
+    );
+  }
+
+  const statusInfo = getStatusInfo();
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-white p-6">
+      <div className="max-w-4xl mx-auto space-y-8">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Assinatura</h1>
+          <p className="text-gray-500 mt-2">
+            Gerencie sua assinatura e dados de pagamento de forma segura
+          </p>
+        </div>
+
+        <Alert className="border-blue-200 bg-blue-50">
+          <Shield className="h-4 w-4 text-blue-600" />
+          <AlertDescription className="text-blue-800">
+            <strong>Segurança:</strong> Todas as operações de pagamento são realizadas de forma segura através do portal do cliente Stripe.
+          </AlertDescription>
+        </Alert>
+
+        <div className="grid md:grid-cols-2 gap-8">
+          <div className="space-y-6">
+            <Card className="border-0 shadow-lg">
+              <CardHeader className="border-b border-gray-100">
+                <CardTitle className="flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <Shield className="w-5 h-5 text-blue-600" />
+                    Status da Conta
+                  </span>
+                  {statusInfo && (
+                    <Badge variant={statusInfo.badge.variant}>
+                      {statusInfo.badge.text}
+                    </Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6">
+                {statusInfo && (
+                  <div className={`p-4 rounded-lg ${statusInfo.bgColor}`}>
+                    <div className="flex items-start gap-3">
+                      <statusInfo.icon className={`w-5 h-5 mt-0.5 ${statusInfo.color}`} />
+                      <div>
+                        <h3 className={`font-medium ${statusInfo.color}`}>
+                          {statusInfo.title}
+                        </h3>
+                        <p className="text-sm text-gray-600 mt-1">
+                          {statusInfo.description}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {company?.pending_block_date && (
+                  <Alert variant="destructive" className="mt-4">
+                    <Calendar className="w-4 h-4" />
+                    <AlertDescription>
+                      Sua conta será bloqueada em {format(new Date(company.pending_block_date), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })} se o pagamento não for processado.
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </CardContent>
+            </Card>
+
+            {(company?.subscription_status !== 'active') && (
+              <Card className="border-0 shadow-lg">
+                <CardHeader className="border-b border-gray-100">
+                  <CardTitle className="flex items-center gap-2">
+                    <CreditCard className="w-5 h-5 text-blue-600" />
+                    Ação Necessária
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  <Button
+                    onClick={handleSubscription}
+                    disabled={processing}
+                    className="w-full bg-blue-600 hover:bg-blue-700"
+                  >
+                    {processing ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                        Abrindo Portal Seguro...
+                      </>
+                    ) : (
+                      <>
+                        <CreditCard className="w-4 h-4 mr-2" />
+                        {company?.subscription_status === 'cancelled' ? 'Reativar Assinatura' : 'Gerenciar Pagamento'}
+                      </>
+                    )}
+                  </Button>
+                   <p className="text-xs text-gray-500 mt-2 text-center">
+                     Você será redirecionado para o portal seguro do Stripe.
+                   </p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          <div className="space-y-6">
+            <Card className="border-0 shadow-lg">
+              <CardHeader className="border-b border-gray-100">
+                <CardTitle>Plano Atual</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <div className="text-center space-y-4">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900">QuoteMaster Pro</h2>
+                    <div className="flex items-baseline justify-center gap-1 mt-2">
+                      <span className="text-3xl font-bold text-blue-600">R$ 30</span>
+                      <span className="text-gray-600">/mês</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 text-left">
+                    <div className="flex items-center gap-3">
+                      <CheckCircle2 className="w-5 h-5 text-green-600" />
+                      <span className="text-sm">Orçamentos ilimitados</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <CheckCircle2 className="w-5 h-5 text-green-600" />
+                      <span className="text-sm">Templates profissionais</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <CheckCircle2 className="w-5 h-5 text-green-600" />
+                      <span className="text-sm">Upload de logo personalizado</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <CheckCircle2 className="w-5 h-5 text-green-600" />
+                      <span className="text-sm">Geração de PDF</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <CheckCircle2 className="w-5 h-5 text-green-600" />
+                      <span className="text-sm">Suporte técnico</span>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-0 shadow-lg">
+              <CardHeader className="border-b border-gray-100">
+                <CardTitle>Próximo Pagamento</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-gray-900">
+                    {/* Placeholder for next payment date, assuming 30 days from now for active subscriptions */}
+                    {company?.subscription_status === 'active' ? format(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), "dd/MM/yyyy", { locale: ptBR }) : 'N/A'}
+                  </p>
+                  <p className="text-gray-500 text-sm mt-1">
+                    Cobrança automática via cartão de crédito
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,342 @@
+
+import React, { useState, useEffect } from "react";
+import { QuoteDraft } from "@/entities/QuoteDraft";
+import { Company } from "@/entities/Company";
+import { User } from "@/entities/User";
+import { useNavigate, useLocation } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { ArrowLeft, Save, FileText, Download } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+
+import QuoteHeader from "../components/editor/QuoteHeader";
+import ItemsList from "../components/editor/ItemsList";
+import TemplateSelector from "../components/editor/TemplateSelector";
+import QuoteSummary from "../components/editor/QuoteSummary";
+import { generateQuotePDF } from "../components/pdf/PdfGenerator";
+
+export default function Editor() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [company, setCompany] = useState(null);
+  const [quote, setQuote] = useState({
+    code: '',
+    title: '',
+    client_name: '',
+    client_email: '',
+    items: [{ 
+      description: '', 
+      unit_price: 0, 
+      needed_quantity: 1, 
+      owned_quantity: 0,
+      buy_quantity: 1,
+      total: 0 
+    }],
+    discount: 0,
+    template_variant: 'variant_a',
+    note: '',
+    status: 'draft'
+  });
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    loadCompanyData();
+    
+    // Load existing quote if editing
+    const urlParams = new URLSearchParams(location.search);
+    const quoteCode = urlParams.get('code');
+    if (quoteCode) {
+      loadExistingQuote(quoteCode);
+    } else {
+      generateQuoteCode();
+    }
+  }, [location.search]);
+
+  const loadCompanyData = async () => {
+    try {
+      const currentUser = await User.me();
+      // Get only current user's company
+      const companies = await Company.filter({ created_by: currentUser.email });
+      if (companies.length > 0) {
+        setCompany(companies[0]);
+      }
+      
+      // Check if current user is admin
+      if (currentUser.role === 'admin') {
+        // Admin bypasses subscription checks
+        setCompany(prev => ({ ...prev, subscription_status: 'active' }));
+      }
+    } catch (error) {
+      console.error("Error loading company:", error);
+    }
+  };
+
+  const loadExistingQuote = async (code) => {
+    try {
+      setLoading(true);
+      const currentUser = await User.me();
+      // Filter quotes by current user
+      const quotes = await QuoteDraft.filter({ code, created_by: currentUser.email });
+      if (quotes.length > 0) {
+        // Ensure new item structure is present for backward compatibility
+        const loadedQuote = {
+          ...quotes[0],
+          items: quotes[0].items.map(item => {
+            // Check for old fields (quantity, already_owned) and map to new
+            const needed_quantity = item.needed_quantity ?? item.quantity ?? 1;
+            const owned_quantity = item.owned_quantity ?? (item.already_owned ? (item.quantity ?? 0) : 0);
+            // If already_owned was true, buy_quantity should be 0. Otherwise, it's needed - owned.
+            const buy_quantity = item.buy_quantity ?? (item.already_owned ? 0 : Math.max(0, needed_quantity - owned_quantity));
+
+            return {
+              ...item,
+              needed_quantity: needed_quantity,
+              owned_quantity: owned_quantity,
+              buy_quantity: buy_quantity,
+              // Calculate total based on buy_quantity if not already set or if mapping from old
+              total: item.total ?? (item.unit_price * buy_quantity),
+              // Clean up old fields if they exist
+              quantity: undefined,
+              already_owned: undefined
+            };
+          })
+        };
+        setQuote(loadedQuote);
+      }
+    } catch (error) {
+      setError('Erro ao carregar orçamento');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const generateQuoteCode = () => {
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 8);
+    setQuote(prev => ({ ...prev, code: `QT-${timestamp}-${random}` }));
+  };
+
+  const calculateTotals = (items, discount = 0) => {
+    const subtotal = items.reduce((sum, item) => sum + (item.total || 0), 0);
+    const discountAmount = (subtotal * discount) / 100;
+    const total = subtotal - discountAmount;
+    return { subtotal, total, discountAmount };
+  };
+
+  const handleItemsChange = (newItems) => {
+    const { subtotal, total } = calculateTotals(newItems, quote.discount);
+    setQuote(prev => ({ 
+      ...prev, 
+      items: newItems,
+      subtotal,
+      total
+    }));
+  };
+
+  const handleDiscountChange = (discount) => {
+    const { subtotal, total } = calculateTotals(quote.items, discount);
+    setQuote(prev => ({ 
+      ...prev, 
+      discount,
+      subtotal,
+      total
+    }));
+  };
+
+  const handleSave = async () => {
+    // Check if user is admin first
+    const currentUser = await User.me();
+    const isAdmin = currentUser.role === 'admin';
+    
+    if (!isAdmin && company?.subscription_status === 'blocked') {
+      setError('Conta bloqueada. Regularize o pagamento para continuar.');
+      return;
+    }
+
+    if (!quote.title.trim() || !quote.client_name.trim()) {
+      setError('Por favor, preencha o título e nome do cliente');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError('');
+
+      const quoteData = {
+        ...quote,
+        ...calculateTotals(quote.items, quote.discount),
+        created_by: currentUser.email // Ensure quote is linked to the user
+      };
+
+      const existing = await QuoteDraft.filter({ code: quote.code, created_by: currentUser.email }); // Filter by user as well
+      
+      if (existing.length > 0) {
+        await QuoteDraft.update(existing[0].id, quoteData);
+      } else {
+        await QuoteDraft.create(quoteData);
+      }
+
+      navigate(createPageUrl("Dashboard"));
+    } catch (error) {
+      setError('Erro ao salvar orçamento');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleFinalize = async () => {
+    // Check if user is admin first
+    const currentUser = await User.me();
+    const isAdmin = currentUser.role === 'admin';
+    
+    if (!isAdmin && company?.subscription_status === 'blocked') {
+      setError('Conta bloqueada. Regularize o pagamento para continuar.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      
+      // First save the quote
+      const quoteData = {
+        ...quote,
+        status: 'finalized',
+        ...calculateTotals(quote.items, quote.discount),
+        created_by: currentUser.email // Ensure quote is linked to the user
+      };
+
+      const existing = await QuoteDraft.filter({ code: quote.code, created_by: currentUser.email }); // Filter by user as well
+      
+      if (existing.length > 0) {
+        await QuoteDraft.update(existing[0].id, quoteData);
+      } else {
+        await QuoteDraft.create(quoteData);
+      }
+
+      // Generate PDF
+      await generateQuotePDF(quoteData);
+      
+      navigate(createPageUrl("Dashboard"));
+    } catch (error) {
+      setError('Erro ao finalizar orçamento');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const isBlocked = company?.subscription_status === 'blocked';
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-white p-6">
+      <div className="max-w-5xl mx-auto space-y-8">
+        <div className="flex items-center gap-4">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => navigate(createPageUrl("Dashboard"))}
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Editor de Orçamento</h1>
+            <p className="text-gray-500 mt-1">Código: {quote.code}</p>
+          </div>
+        </div>
+
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {isBlocked && (
+          <Alert variant="destructive">
+            <AlertDescription>
+              Sua conta está bloqueada. Regularize o pagamento para continuar usando o sistema.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <div className="grid lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2 space-y-6">
+            <QuoteHeader 
+              quote={quote}
+              onChange={setQuote}
+              company={company}
+            />
+            
+            <ItemsList 
+              items={quote.items}
+              onChange={handleItemsChange}
+              disabled={isBlocked}
+            />
+            
+            <TemplateSelector
+              selectedVariant={quote.template_variant}
+              onChange={(variant) => setQuote(prev => ({ ...prev, template_variant: variant }))}
+            />
+
+            <Card className="border-0 shadow-lg">
+              <CardHeader>
+                <CardTitle className="text-lg font-semibold">Observações</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Textarea
+                  placeholder="Adicione observações ou condições especiais..."
+                  value={quote.note}
+                  onChange={(e) => setQuote(prev => ({ ...prev, note: e.target.value }))}
+                  rows={4}
+                  disabled={isBlocked}
+                />
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="space-y-6">
+            <QuoteSummary 
+              items={quote.items}
+              discount={quote.discount}
+              onDiscountChange={handleDiscountChange}
+              disabled={isBlocked}
+            />
+
+            <div className="flex flex-col gap-3">
+              <Button
+                onClick={handleSave}
+                disabled={saving || isBlocked}
+                className="w-full bg-blue-600 hover:bg-blue-700"
+              >
+                <Save className="w-4 h-4 mr-2" />
+                {saving ? 'Salvando...' : 'Salvar Rascunho'}
+              </Button>
+              
+              <Button
+                onClick={handleFinalize}
+                disabled={saving || isBlocked}
+                variant="outline"
+                className="w-full border-green-600 text-green-600 hover:bg-green-50"
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Finalizar e Gerar PDF
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,214 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter,
+} from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Toaster } from '@/components/ui/toaster';
+import { useToast } from '@/components/ui/use-toast';
+import { Loader2 } from 'lucide-react';
+
+// Função para carregar o Stripe.js do CDN, garantindo que esteja disponível
+const loadStripeFromCDN = () => {
+  return new Promise((resolve, reject) => {
+    if (window.Stripe) {
+      resolve(window.Stripe);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://js.stripe.com/v3/';
+    script.onload = () => resolve(window.Stripe);
+    script.onerror = () => reject('Falha ao carregar o script do Stripe.');
+    document.head.appendChild(script);
+  });
+};
+
+const stripePromise = loadStripeFromCDN();
+
+export default function HomePage() {
+  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
+  const [token, setToken] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const { toast } = useToast();
+
+  // Obtém o token JWT do backend da plataforma ao carregar a página.
+  useEffect(() => {
+    const fetchToken = async () => {
+      try {
+        const response = await fetch('/token'); // Caminho relativo para o backend
+        if (!response.ok) {
+          throw new Error('Falha ao obter o token JWT.');
+        }
+        const data = await response.json();
+        setToken(data.access_token);
+        localStorage.setItem('jwt_token', data.access_token); // Armazenar para reuso
+        console.log('Token JWT obtido com sucesso.');
+      } catch (error) {
+        console.error('Erro ao obter token:', error);
+        toast({
+          title: 'Erro de autenticação',
+          description: 'Não foi possível obter um token de acesso. Verifique sua sessão.',
+          variant: 'destructive',
+        });
+      }
+    };
+
+    fetchToken();
+  }, [toast]);
+
+  // Função para lidar com o envio do formulário de pagamento
+  const handlePayment = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+
+    if (!token) {
+      toast({
+        title: 'Erro de autenticação',
+        description: 'Token de acesso não disponível. A página será recarregada.',
+        variant: 'destructive',
+      });
+      setIsLoading(false);
+      setTimeout(() => window.location.reload(), 2000);
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/v1/banked/checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Erro ao criar a sessão de checkout.');
+      }
+
+      const session = await response.json();
+      
+      const stripe = await stripePromise;
+      if (!stripe) {
+        throw new Error('Stripe.js não carregado corretamente.');
+      }
+      
+      // O backend do Stripe agora usa o e-mail do token, mas podemos passar para consistência
+      const { error } = await stripe.redirectToCheckout({
+        sessionId: session.id,
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+    } catch (error) {
+      console.error('Erro de pagamento:', error);
+      toast({
+        title: 'Erro de pagamento',
+        description: error.message || 'Ocorreu um erro ao processar o seu pagamento.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Função para abrir o portal do cliente
+  const handleCustomerPortal = async () => {
+    if (!token) {
+      toast({
+        title: 'Erro de autenticação',
+        description: 'Token de acesso não disponível.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    try {
+      const response = await fetch('/api/v1/stripe/create-customer-portal', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Erro ao criar a sessão do portal do cliente.');
+      }
+
+      const session = await response.json();
+      window.location.href = session.portal_url;
+    } catch (error) {
+      console.error('Erro ao abrir o portal do cliente:', error);
+      toast({
+        title: 'Erro',
+        description: error.message || 'Ocorreu um erro ao abrir o portal do cliente.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-gray-100">
+      <Card className="w-full max-w-sm rounded-lg shadow-lg">
+        <CardHeader>
+          <CardTitle className="text-2xl font-bold text-center text-gray-800">Assinatura Premium</CardTitle>
+          <CardDescription className="text-center text-gray-600">
+            Preencha os seus dados para iniciar o checkout.
+          </CardDescription>
+        </CardHeader>
+        <form onSubmit={handlePayment}>
+          <CardContent className="grid gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="name">Nome Completo</Label>
+              <Input
+                id="name"
+                type="text"
+                placeholder="João Silva"
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="seu-email@exemplo.com"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+          </CardContent>
+          <CardFooter className="flex flex-col gap-4">
+            <Button type="submit" className="w-full text-white bg-blue-600 hover:bg-blue-700" disabled={isLoading}>
+              {isLoading ? (
+                <>
+                  <Loader2 className="animate-spin -ml-1 mr-3 h-5 w-5" />
+                  Redirecionando...
+                </>
+              ) : (
+                'Pagar'
+              )}
+            </Button>
+            <Button type="button" onClick={handleCustomerPortal} className="w-full" variant="outline">
+              Gerir Assinatura
+            </Button>
+          </CardFooter>
+        </form>
+      </Card>
+      <Toaster />
+    </div>
+  );
+}

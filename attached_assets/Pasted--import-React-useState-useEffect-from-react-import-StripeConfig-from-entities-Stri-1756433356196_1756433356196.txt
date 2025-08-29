@@ -1,0 +1,281 @@
+
+import React, { useState, useEffect } from "react";
+import { StripeConfig } from "@/entities/StripeConfig";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Save, CreditCard, Key, DollarSign, Webhook, ExternalLink } from "lucide-react";
+
+export default function StripeSetup() {
+  const [config, setConfig] = useState({
+    stripe_publishable_key: '',
+    stripe_secret_key: '',
+    stripe_price_id: '',
+    monthly_price: 30,
+    webhook_secret: ''
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    loadConfig();
+  }, []);
+
+  const loadConfig = async () => {
+    try {
+      const configs = await StripeConfig.list();
+      if (configs.length > 0) {
+        setConfig(configs[0]);
+      }
+    } catch (error) {
+      console.error("Error loading config:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      setMessage('');
+      setError('');
+
+      if (!config.stripe_publishable_key || !config.monthly_price) {
+        setError('Preencha pelo menos a chave pública e o preço mensal');
+        return;
+      }
+
+      const existing = await StripeConfig.list();
+      
+      if (existing.length > 0) {
+        await StripeConfig.update(existing[0].id, config);
+      } else {
+        await StripeConfig.create(config);
+      }
+
+      setMessage('Configuração do Stripe salva com sucesso!');
+    } catch (error) {
+      setError('Erro ao salvar configuração');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-white p-6">
+      <div className="max-w-4xl mx-auto space-y-8">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-2xl mx-auto mb-4 flex items-center justify-center">
+            <CreditCard className="w-8 h-8 text-white" />
+          </div>
+          <h1 className="text-3xl font-bold text-gray-900">Configuração do Stripe</h1>
+          <p className="text-gray-500 mt-2">
+            Configure suas chaves do Stripe para receber pagamentos
+          </p>
+        </div>
+
+        {message && (
+          <Alert className="border-green-200 bg-green-50">
+            <AlertDescription className="text-green-800">{message}</AlertDescription>
+          </Alert>
+        )}
+
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        <div className="space-y-6">
+          {/* Tutorial */}
+          <Card className="border-blue-200 bg-blue-50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-blue-800">
+                <ExternalLink className="w-5 h-5" />
+                Como Configurar
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-blue-700 space-y-3">
+              <div className="space-y-2">
+                <p><strong>1. Acesse o Stripe Dashboard:</strong></p>
+                <p className="text-sm pl-4">• Vá para <a href="https://dashboard.stripe.com" target="_blank" rel="noopener noreferrer" className="underline">dashboard.stripe.com</a></p>
+                <p className="text-sm pl-4">• Faça login ou crie uma conta</p>
+              </div>
+              
+              <div className="space-y-2">
+                <p><strong>2. Obtenha as Chaves da API:</strong></p>
+                <p className="text-sm pl-4">• Vá em "Desenvolvedores" → "Chaves da API"</p>
+                <p className="text-sm pl-4">• Copie a "Chave publicável" e a "Chave secreta"</p>
+              </div>
+              
+              <div className="space-y-2">
+                <p><strong>3. Crie um Produto/Preço:</strong></p>
+                <p className="text-sm pl-4">• Vá em "Produtos" → "Criar produto"</p>
+                <p className="text-sm pl-4">• Nome: "QuoteMaster Pro"</p>
+                <p className="text-sm pl-4">• Crie um preço recorrente mensal de R$ 30,00</p>
+                <p className="text-sm pl-4">• Copie o ID do preço (inicia com "price_")</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Configuration Form */}
+          <div className="grid md:grid-cols-2 gap-6">
+            <Card className="border-0 shadow-lg">
+              <CardHeader className="border-b border-gray-100">
+                <CardTitle className="flex items-center gap-2">
+                  <Key className="w-5 h-5 text-blue-600" />
+                  Chaves da API
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6 space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="publishable-key">Chave Publicável *</Label>
+                  <Input
+                    id="publishable-key"
+                    value={config.stripe_publishable_key}
+                    onChange={(e) => setConfig(prev => ({ ...prev, stripe_publishable_key: e.target.value }))}
+                    placeholder="pk_live_... ou pk_test_..."
+                    className="font-mono text-sm"
+                  />
+                  <p className="text-xs text-gray-500">
+                    Começa com pk_live_ (produção) ou pk_test_ (teste)
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="secret-key">Chave Secreta</Label>
+                  <Input
+                    id="secret-key"
+                    type="password"
+                    value={config.stripe_secret_key}
+                    onChange={(e) => setConfig(prev => ({ ...prev, stripe_secret_key: e.target.value }))}
+                    placeholder="sk_live_... ou sk_test_..."
+                    className="font-mono text-sm"
+                  />
+                  <p className="text-xs text-gray-500">
+                    Começa com sk_live_ (produção) ou sk_test_ (teste)
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-0 shadow-lg">
+              <CardHeader className="border-b border-gray-100">
+                <CardTitle className="flex items-center gap-2">
+                  <DollarSign className="w-5 h-5 text-green-600" />
+                  Configuração de Preço
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6 space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="price-id">ID do Preço no Stripe</Label>
+                  <Input
+                    id="price-id"
+                    value={config.stripe_price_id}
+                    onChange={(e) => setConfig(prev => ({ ...prev, stripe_price_id: e.target.value }))}
+                    placeholder="price_1234567890"
+                    className="font-mono text-sm"
+                  />
+                  <p className="text-xs text-gray-500">
+                    ID do preço criado no Stripe (começa com price_)
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="monthly-price">Preço Mensal (R$) *</Label>
+                  <Input
+                    id="monthly-price"
+                    type="number"
+                    min="1"
+                    step="0.01"
+                    value={config.monthly_price}
+                    onChange={(e) => setConfig(prev => ({ ...prev, monthly_price: parseFloat(e.target.value) || 0 }))}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card className="border-0 shadow-lg">
+            <CardHeader className="border-b border-gray-100">
+              <CardTitle className="flex items-center gap-2">
+                <Webhook className="w-5 h-5 text-purple-600" />
+                Configuração de Webhook (Opcional)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-6 space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="webhook-secret">Secret do Webhook</Label>
+                <Input
+                  id="webhook-secret"
+                  type="password"
+                  value={config.webhook_secret}
+                  onChange={(e) => setConfig(prev => ({ ...prev, webhook_secret: e.target.value }))}
+                  placeholder="whsec_..."
+                  className="font-mono text-sm"
+                />
+                <p className="text-xs text-gray-500">
+                  Para verificar assinaturas automaticamente (começa com whsec_)
+                </p>
+              </div>
+
+              <Alert className="bg-yellow-50 border-yellow-200">
+                <AlertDescription className="text-yellow-800">
+                  <strong>URL do Webhook:</strong> Configure no Stripe para apontar para:<br/>
+                  <code className="bg-yellow-100 px-2 py-1 rounded text-sm">https://seu-dominio.com/api/stripe/webhook</code>
+                </AlertDescription>
+              </Alert>
+            </CardContent>
+          </Card>
+
+          <div className="flex justify-end">
+            <Button
+              onClick={handleSave}
+              disabled={saving || !config.stripe_publishable_key || !config.monthly_price}
+              className="bg-blue-600 hover:bg-blue-700 px-8"
+            >
+              <Save className="w-4 h-4 mr-2" />
+              {saving ? 'Salvando...' : 'Salvar Configuração'}
+            </Button>
+          </div>
+
+          <Card className="border-green-200 bg-green-50">
+            <CardContent className="pt-6">
+              <div className="text-center space-y-2">
+                <p className="text-green-800 font-semibold">
+                  🎉 Após configurar, todos os usuários serão cobrados R$ {config.monthly_price}/mês
+                </p>
+                <p className="text-green-700 text-sm">
+                  Os pagamentos vão direto para sua conta Stripe conectada
+                </p>
+                
+                <Alert className="mt-4 bg-blue-50 border-blue-200">
+                  <AlertDescription className="text-blue-800">
+                    <strong>⚙️ Para implementação completa do Stripe:</strong><br/>
+                    1. Configure um backend com endpoints para Stripe<br/>
+                    2. Implemente webhooks para processar pagamentos<br/>
+                    3. Substitua a simulação no arquivo Onboarding.js<br/><br/>
+                    <strong>Atualmente:</strong> Sistema funciona em modo demonstração
+                  </AlertDescription>
+                </Alert>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
