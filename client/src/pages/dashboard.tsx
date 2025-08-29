@@ -77,6 +77,31 @@ export default function Dashboard() {
     }
   }, [quotesError, toast]);
 
+  // Force company setup if not completed
+  useEffect(() => {
+    if (user && isAuthenticated && !company && !isLoading) {
+      // Check if email is missing
+      if (!user.email) {
+        toast({
+          title: "Email Obrigatório",
+          description: "Um email válido é necessário para usar a plataforma. Entre em contato com o suporte.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Redirect to company setup if company is not configured
+      setTimeout(() => {
+        toast({
+          title: "Configure sua Empresa",
+          description: "Complete a configuração da sua empresa para continuar usando a plataforma.",
+          variant: "default",
+        });
+        window.location.href = "/company";
+      }, 2000);
+    }
+  }, [user, company, isAuthenticated, isLoading, toast]);
+
   if (isLoading || !user) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">

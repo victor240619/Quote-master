@@ -16,7 +16,10 @@ import { z } from "zod";
 import { Link } from "wouter";
 
 const companySchema = insertCompanySchema.extend({
-  name: z.string().min(1, "Nome da empresa é obrigatório"),
+  name: z.string()
+    .min(3, "Nome da empresa deve ter pelo menos 3 caracteres")
+    .max(100, "Nome da empresa deve ter no máximo 100 caracteres")
+    .regex(/^[A-Za-zÀ-ÿ0-9\s\-\.&]+$/, "Nome deve conter apenas letras, números e caracteres básicos"),
   logoUrl: z.string().url("URL inválida").optional().or(z.literal("")),
 });
 
@@ -189,6 +192,26 @@ export default function CompanyPage() {
           </Link>
         </div>
 
+        {/* Onboarding Notice */}
+        {!company && (
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="p-6">
+              <div className="flex items-start gap-4">
+                <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
+                  <Building className="w-5 h-5 text-primary" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-foreground mb-2">Configure sua Empresa</h3>
+                  <p className="text-muted-foreground text-sm">
+                    Para continuar usando o QuoteMaster Pro, é necessário configurar os dados da sua empresa. 
+                    Essas informações aparecerão nos seus orçamentos e são obrigatórias para o funcionamento da plataforma.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Company Form */}
         <Card className="shadow-lg">
           <CardHeader>
@@ -289,7 +312,7 @@ export default function CompanyPage() {
                   <Button 
                     type="submit" 
                     disabled={createMutation.isPending || updateMutation.isPending}
-                    className="flex items-center gap-2"
+                    className={`flex items-center gap-2 ${!company ? "bg-primary hover:bg-primary/90" : ""}`}
                     data-testid="button-save-company"
                   >
                     <Save className="w-4 h-4" />
@@ -297,7 +320,7 @@ export default function CompanyPage() {
                       ? "Salvando..." 
                       : company 
                         ? "Salvar Alterações" 
-                        : "Criar Empresa"
+                        : "✓ Completar Configuração Obrigatória"
                     }
                   </Button>
                 </div>

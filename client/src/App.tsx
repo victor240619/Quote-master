@@ -8,6 +8,7 @@ import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
 import Quotes from "@/pages/quotes";
+import QuoteEditor from "@/pages/quote-editor";
 import CompanyPage from "@/pages/company";
 import Subscription from "@/pages/subscription";
 import AdminPanel from "@/pages/admin-panel";
@@ -23,6 +24,8 @@ function Router() {
         <>
           <Route path="/" component={Dashboard} />
           <Route path="/quotes" component={Quotes} />
+          <Route path="/quote-editor" component={QuoteEditor} />
+          <Route path="/quote-editor/:id" component={QuoteEditor} />
           <Route path="/company" component={CompanyPage} />
           <Route path="/subscription" component={Subscription} />
           <Route path="/admin" component={AdminPanel} />

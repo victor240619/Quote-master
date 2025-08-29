@@ -323,7 +323,7 @@ export default function Subscription() {
                 <div>
                   <h4 className="font-medium text-foreground mb-2">Valor Mensal</h4>
                   <p className="text-2xl font-bold text-foreground" data-testid="text-subscription-price">
-                    R$ 29,90
+                    R$ 30,00
                   </p>
                   <p className="text-sm text-muted-foreground">por mês</p>
                 </div>
@@ -369,7 +369,7 @@ export default function Subscription() {
                       Preparando...
                     </>
                   ) : (
-                    'Ativar Assinatura - R$ 29,90/mês'
+                    'Ativar Assinatura - R$ 30,00/mês'
                   )}
                 </Button>
               )}

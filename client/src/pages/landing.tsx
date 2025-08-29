@@ -25,7 +25,7 @@ export default function Landing() {
               onClick={() => window.location.href = '/api/login'}
               data-testid="button-login"
             >
-              Entrar com Replit
+              Entrar na Plataforma
             </Button>
           </div>
         </div>
