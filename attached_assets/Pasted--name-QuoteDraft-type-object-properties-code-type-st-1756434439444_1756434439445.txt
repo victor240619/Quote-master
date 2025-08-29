@@ -1,0 +1,122 @@
+{
+  "name": "QuoteDraft",
+  "type": "object",
+  "properties": {
+    "code": {
+      "type": "string",
+      "description": "Código único do orçamento"
+    },
+    "title": {
+      "type": "string",
+      "description": "Título do orçamento"
+    },
+    "client_name": {
+      "type": "string",
+      "description": "Nome do cliente"
+    },
+    "client_email": {
+      "type": "string",
+      "description": "Email do cliente"
+    },
+    "items": {
+      "type": "array",
+      "description": "Itens do orçamento",
+      "items": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "unit_price": {
+            "type": "number"
+          },
+          "needed_quantity": {
+            "type": "number",
+            "description": "Quantidade necessária total"
+          },
+          "owned_quantity": {
+            "type": "number",
+            "default": 0,
+            "description": "Quantidade que o cliente já possui"
+          },
+          "buy_quantity": {
+            "type": "number",
+            "description": "Quantidade a comprar (calculado)"
+          },
+          "total": {
+            "type": "number",
+            "description": "Total a pagar (preço unit. * qtd a comprar)"
+          }
+        }
+      }
+    },
+    "discount": {
+      "type": "number",
+      "default": 0,
+      "description": "Desconto aplicado"
+    },
+    "currency": {
+      "type": "string",
+      "default": "BRL",
+      "description": "Moeda"
+    },
+    "template_variant": {
+      "type": "string",
+      "enum": [
+        "variant_a",
+        "variant_b",
+        "variant_c",
+        "variant_d",
+        "variant_e"
+      ],
+      "default": "variant_a",
+      "description": "Variante do template"
+    },
+    "note": {
+      "type": "string",
+      "description": "Observações"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "finalized"
+      ],
+      "default": "draft",
+      "description": "Status do orçamento"
+    },
+    "pdf_path": {
+      "type": "string",
+      "description": "Caminho do PDF gerado"
+    },
+    "subtotal": {
+      "type": "number",
+      "description": "Subtotal calculado"
+    },
+    "total": {
+      "type": "number",
+      "description": "Total final"
+    }
+  },
+  "required": [
+    "code",
+    "title"
+  ],
+  "rls": {
+    "read": {
+      "$or": [
+        {
+          "created_by": "{{user.email}}"
+        },
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        }
+      ]
+    },
+    "write": {
+      "created_by": "{{user.email}}"
+    }
+  }
+}
