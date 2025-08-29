@@ -214,13 +214,20 @@ export default function Quotes() {
             <Link href="/">
               <Button variant="outline" data-testid="button-back-dashboard">Dashboard</Button>
             </Link>
-            <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
-              <DialogTrigger asChild>
-                <Button data-testid="button-new-quote">
+            <div className="flex items-center gap-2">
+              <Link href="/quote-editor">
+                <Button data-testid="button-new-advanced-quote">
                   <Plus className="w-4 h-4 mr-2" />
-                  Novo Orçamento
+                  Editor Avançado
                 </Button>
-              </DialogTrigger>
+              </Link>
+              <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" data-testid="button-new-quote">
+                    <Plus className="w-4 h-4 mr-2" />
+                    Criação Rápida
+                  </Button>
+                </DialogTrigger>
               <DialogContent className="max-w-2xl">
                 <DialogHeader>
                   <DialogTitle data-testid="dialog-title-create-quote">Criar Novo Orçamento</DialogTitle>
@@ -313,6 +320,7 @@ export default function Quotes() {
                 </form>
               </DialogContent>
             </Dialog>
+            </div>
           </div>
         </div>
 

@@ -1,0 +1,100 @@
+import React from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Palette, Check } from "lucide-react";
+
+interface TemplateSelectorProps {
+  selectedVariant: string;
+  onChange: (variant: string) => void;
+}
+
+export default function TemplateSelector({ selectedVariant, onChange }: TemplateSelectorProps) {
+  const templates = [
+    {
+      id: 'variant_a',
+      name: 'Template Clássico',
+      description: 'Design limpo com cores azuis corporativas.',
+      colors: ['#2563eb', '#1e40af', '#1d4ed8']
+    },
+    {
+      id: 'variant_b', 
+      name: 'Template Moderno',
+      description: 'Layout contemporâneo com gradientes roxos.',
+      colors: ['#7c3aed', '#8b5cf6', '#a855f7']
+    },
+    {
+      id: 'variant_c',
+      name: 'Template Elegante',
+      description: 'Tema escuro com detalhes em dourado. Sofisticado.',
+      colors: ['#2d3748', '#a0aec0', '#c59d5f']
+    },
+    {
+      id: 'variant_d',
+      name: 'Template Criativo',
+      description: 'Cores vibrantes de verde e um layout dinâmico.',
+      colors: ['#047857', '#059669', '#10b981']
+    },
+    {
+      id: 'variant_e',
+      name: 'Template Minimalista',
+      description: 'Foco no conteúdo, com um forte destaque em laranja.',
+      colors: ['#1f2937', '#e5e7eb', '#f97316']
+    }
+  ];
+
+  return (
+    <Card className="border-0 shadow-lg">
+      <CardHeader className="border-b border-gray-100">
+        <CardTitle className="flex items-center gap-2">
+          <Palette className="w-5 h-5 text-blue-600" />
+          Template do Orçamento
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="pt-6">
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {templates.map((template) => (
+            <div
+              key={template.id}
+              className={`relative border-2 rounded-lg p-4 cursor-pointer transition-all duration-200 ${
+                selectedVariant === template.id
+                  ? 'border-blue-600 bg-blue-50'
+                  : 'border-gray-200 hover:border-gray-300'
+              }`}
+              onClick={() => onChange(template.id)}
+              data-testid={`template-${template.id}`}
+            >
+              {selectedVariant === template.id && (
+                <div className="absolute top-2 right-2 w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center">
+                  <Check className="w-4 h-4 text-white" />
+                </div>
+              )}
+              
+              <div className="space-y-3">
+                <div className="aspect-[16/10] bg-gray-100 rounded border overflow-hidden">
+                  <div className="w-full h-full bg-gradient-to-br from-gray-200 to-gray-300 flex items-center justify-center">
+                    <span className="text-gray-500 text-sm">Preview</span>
+                  </div>
+                </div>
+                
+                <div>
+                  <h3 className="font-semibold text-gray-900">{template.name}</h3>
+                  <p className="text-sm text-gray-600 mt-1">{template.description}</p>
+                </div>
+                
+                <div className="flex gap-2">
+                  {template.colors.map((color, index) => (
+                    <div
+                      key={index}
+                      className="w-6 h-6 rounded-full border-2 border-white shadow-sm"
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
