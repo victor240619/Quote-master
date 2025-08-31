@@ -4,3 +4,25 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+
+# Ambientes virtuais
+env/
+venv/
+
+# Configs locais
+*.env
+*.local
+.local/
+.vscode/
+.idea/
+
+# Arquivos de sistema
+.DS_Store
+Thumbs.db
