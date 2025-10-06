@@ -55,6 +55,20 @@ export const companies = pgTable("companies", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Payment settings per company for transaction simulations
+export const paymentSettings = pgTable("payment_settings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  companyId: varchar("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  // Percentages are expressed as numeric fractions (e.g., 0.031 for 3.1%)
+  pixPercent: numeric("pix_percent").default("0"),
+  debitPercent: numeric("debit_percent").default("0"),
+  creditPercent: numeric("credit_percent").default("0"),
+  installmentMonthlyInterestPercent: numeric("installment_monthly_interest_percent").default("0"),
+  passFeesToCustomerByDefault: boolean("pass_fees_to_customer_by_default").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Quote items schema
 export const quoteItems = pgTable("quote_items", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -64,6 +78,10 @@ export const quoteItems = pgTable("quote_items", {
   neededQuantity: numeric("needed_quantity").notNull(),
   ownedQuantity: numeric("owned_quantity").default("0"),
   buyQuantity: numeric("buy_quantity").notNull(),
+  // Item classification and discounts for fine-grained calculations
+  itemType: varchar("item_type").default("material"), // material | service
+  discountType: varchar("discount_type").default("percent"), // percent | fixed
+  discountValue: numeric("discount_value").default("0"),
   total: numeric("total").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -75,14 +93,31 @@ export const quoteDrafts = pgTable("quote_drafts", {
   title: varchar("title").notNull(),
   clientName: varchar("client_name"),
   clientEmail: varchar("client_email"),
+  // Legacy percent discount. Keep for backward compatibility
   discount: numeric("discount").default("0"),
+  // New global discount controls
+  discountMode: varchar("discount_mode").default("percent"), // percent | fixed
+  discountFixed: numeric("discount_fixed").default("0"), // in BRL
   currency: varchar("currency").default("BRL"),
   templateVariant: varchar("template_variant").default("variant_a"), // variant_a to variant_e
   note: text("note"),
   status: varchar("status").default("draft"), // draft, finalized
   pdfPath: varchar("pdf_path"),
-  subtotal: numeric("subtotal"),
-  total: numeric("total"),
+  // Aggregated totals for financial transparency
+  subtotal: numeric("subtotal"), // legacy subtotal (may equal net base)
+  total: numeric("total"), // legacy total (may equal net base)
+  subtotalGross: numeric("subtotal_gross"), // sum of (qty * unit price) across items
+  itemsDiscountTotal: numeric("items_discount_total"), // sum of per-item discounts
+  netBaseTotal: numeric("net_base_total"), // subtotalGross - itemsDiscountTotal - global discount
+  // Payment simulation selections and outcomes
+  paymentMethod: varchar("payment_method"), // pix | debit | credit
+  installments: integer("installments").default(1),
+  passFeesToCustomer: boolean("pass_fees_to_customer").default(true),
+  transactionFeeAmount: numeric("transaction_fee_amount"),
+  finalClientAmount: numeric("final_client_amount"),
+  netReceivedAmount: numeric("net_received_amount"),
+  // Approval timestamp for revenue recognition
+  approvedAt: timestamp("approved_at"),
   companyId: varchar("company_id").notNull().references(() => companies.id),
   createdBy: varchar("created_by").notNull().references(() => users.email),
   createdAt: timestamp("created_at").defaultNow(),
@@ -159,3 +194,6 @@ export type InsertQuoteDraft = z.infer<typeof insertQuoteDraftSchema>;
 
 export type QuoteItem = typeof quoteItems.$inferSelect;
 export type InsertQuoteItem = z.infer<typeof insertQuoteItemSchema>;
+
+export type PaymentSettings = typeof paymentSettings.$inferSelect;
+export type InsertPaymentSettings = typeof paymentSettings.$inferInsert;

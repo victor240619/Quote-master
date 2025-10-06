@@ -75,6 +75,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Payment settings routes
+  app.get('/api/payment-settings/me', isAuthenticated, async (req: any, res) => {
+    try {
+      const userEmail = req.user.claims.email;
+      const company = await storage.getCompanyByUser(userEmail);
+      if (!company) {
+        return res.json(null);
+      }
+      const settings = await storage.getPaymentSettings(company.id);
+      res.json(settings || null);
+    } catch (error) {
+      console.error("Error fetching payment settings:", error);
+      res.status(500).json({ message: "Failed to fetch payment settings" });
+    }
+  });
+
+  app.put('/api/payment-settings', isAuthenticated, async (req: any, res) => {
+    try {
+      const userEmail = req.user.claims.email;
+      const company = await storage.getCompanyByUser(userEmail);
+      if (!company) {
+        return res.status(400).json({ message: "Company not found. Please create a company first." });
+      }
+      const settings = await storage.upsertPaymentSettings(company.id, req.body || {});
+      res.json(settings);
+    } catch (error) {
+      console.error("Error updating payment settings:", error);
+      res.status(500).json({ message: "Failed to update payment settings" });
+    }
+  });
+
   app.post('/api/companies', isAuthenticated, async (req: any, res) => {
     try {
       const userEmail = req.user.claims.email;
@@ -265,6 +296,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching quote items:", error);
       res.status(500).json({ message: "Failed to fetch quote items" });
+    }
+  });
+
+  // Item description suggestions for autocomplete
+  app.get('/api/item-suggestions', isAuthenticated, async (req: any, res) => {
+    try {
+      const q = (req.query.q as string) || '';
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 10;
+      const suggestions = await storage.listItemDescriptions(q, Number.isFinite(limit) ? limit : 10);
+      res.json({ suggestions });
+    } catch (error) {
+      console.error("Error fetching item suggestions:", error);
+      res.status(500).json({ message: "Failed to fetch item suggestions" });
     }
   });
 
