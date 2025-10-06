@@ -1,5 +1,5 @@
 import { apiRequest } from "@/lib/queryClient";
-import type { QuoteDraft, InsertQuoteDraft, QuoteItem, InsertQuoteItem } from "@shared/schema";
+import type { QuoteDraft, InsertQuoteDraft, QuoteItem, InsertQuoteItem, PaymentSettings } from "@shared/schema";
 
 export class QuoteDraftEntity {
   static async list(): Promise<QuoteDraft[]> {
@@ -43,6 +43,25 @@ export class QuoteDraftEntity {
 
   static async deleteItem(quoteId: string, itemId: string): Promise<void> {
     await apiRequest("DELETE", `/api/quotes/${quoteId}/items/${itemId}`);
+  }
+
+  // Payment settings
+  static async getPaymentSettings(): Promise<PaymentSettings | null> {
+    const response = await apiRequest("GET", "/api/payment-settings/me");
+    return response.json();
+  }
+
+  static async updatePaymentSettings(data: Partial<PaymentSettings>): Promise<PaymentSettings> {
+    const response = await apiRequest("PUT", "/api/payment-settings", data as any);
+    return response.json();
+  }
+
+  // Item suggestions
+  static async suggestItems(query: string, limit: number = 10): Promise<string[]> {
+    const url = `/api/item-suggestions?q=${encodeURIComponent(query)}&limit=${limit}`;
+    const response = await apiRequest("GET", url);
+    const data = await response.json();
+    return data.suggestions || [];
   }
 }
 
