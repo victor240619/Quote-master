@@ -1,6 +1,7 @@
 import {
   users,
   companies,
+  paymentSettings,
   quoteDrafts,
   quoteItems,
   type User,
@@ -11,6 +12,8 @@ import {
   type InsertQuoteDraft,
   type QuoteItem,
   type InsertQuoteItem,
+  type PaymentSettings,
+  type InsertPaymentSettings,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, sql } from "drizzle-orm";
@@ -31,6 +34,10 @@ export interface IStorage {
   updateCompany(companyId: string, data: Partial<Company>): Promise<Company>;
   listCompanies(): Promise<Company[]>;
 
+  // Payment settings operations
+  getPaymentSettings(companyId: string): Promise<PaymentSettings | undefined>;
+  upsertPaymentSettings(companyId: string, data: Partial<InsertPaymentSettings>): Promise<PaymentSettings>;
+
   // Quote operations
   createQuoteDraft(quote: InsertQuoteDraft): Promise<QuoteDraft>;
   updateQuoteDraft(quoteId: string, data: Partial<QuoteDraft>): Promise<QuoteDraft>;
@@ -43,6 +50,9 @@ export interface IStorage {
   updateQuoteItem(itemId: string, data: Partial<QuoteItem>): Promise<QuoteItem>;
   deleteQuoteItem(itemId: string): Promise<void>;
   getQuoteItems(quoteDraftId: string): Promise<QuoteItem[]>;
+
+  // Item suggestions
+  listItemDescriptions(query?: string, limit?: number): Promise<string[]>;
 
   // Generate unique quote code
   generateQuoteCode(): Promise<string>;
@@ -128,6 +138,39 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(companies).orderBy(desc(companies.createdAt));
   }
 
+  async getPaymentSettings(companyId: string): Promise<PaymentSettings | undefined> {
+    const [row] = await db
+      .select()
+      .from(paymentSettings)
+      .where(eq(paymentSettings.companyId, companyId));
+    return row;
+  }
+
+  async upsertPaymentSettings(companyId: string, data: Partial<InsertPaymentSettings>): Promise<PaymentSettings> {
+    // Try update existing
+    const existing = await this.getPaymentSettings(companyId);
+    if (existing) {
+      const [updated] = await db
+        .update(paymentSettings)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(paymentSettings.id, existing.id))
+        .returning();
+      return updated;
+    }
+    const [created] = await db
+      .insert(paymentSettings)
+      .values({
+        companyId,
+        pixPercent: (data as any)?.pixPercent ?? undefined,
+        debitPercent: (data as any)?.debitPercent ?? undefined,
+        creditPercent: (data as any)?.creditPercent ?? undefined,
+        installmentMonthlyInterestPercent: (data as any)?.installmentMonthlyInterestPercent ?? undefined,
+        passFeesToCustomerByDefault: (data as any)?.passFeesToCustomerByDefault ?? undefined,
+      })
+      .returning();
+    return created;
+  }
+
   async createQuoteDraft(quote: InsertQuoteDraft): Promise<QuoteDraft> {
     const [newQuote] = await db
       .insert(quoteDrafts)
@@ -197,6 +240,20 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(quoteItems)
       .where(eq(quoteItems.quoteDraftId, quoteDraftId));
+  }
+
+  async listItemDescriptions(query?: string, limit: number = 10): Promise<string[]> {
+    // Basic suggestion: distinct descriptions matching query
+    // Note: drizzle distinct + ilike can be expressed via sql
+    if (query && query.trim().length > 0) {
+      const rows = await db.execute(sql`SELECT DISTINCT description FROM ${quoteItems} WHERE ${quoteItems.description} ILIKE ${'%' + query + '%'} LIMIT ${limit}`);
+      // rows.rows is any[] with { description }
+      // @ts-ignore
+      return (rows.rows || []).map((r: any) => r.description).filter(Boolean);
+    }
+    const rows = await db.execute(sql`SELECT DISTINCT description FROM ${quoteItems} ORDER BY description ASC LIMIT ${limit}`);
+    // @ts-ignore
+    return (rows.rows || []).map((r: any) => r.description).filter(Boolean);
   }
 
   async generateQuoteCode(): Promise<string> {
