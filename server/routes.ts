@@ -7,21 +7,26 @@ import { insertCompanySchema, insertQuoteDraftSchema, insertQuoteItemSchema } fr
 import Stripe from "stripe";
 
 if (!process.env.STRIPE_SECRET_KEY) {
-  throw new Error('Missing required Stripe secret: STRIPE_SECRET_KEY');
+  console.warn('Warning: STRIPE_SECRET_KEY is not set. Stripe features will be disabled.');
 }
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2025-08-27.basil",
-});
+const stripe = process.env.STRIPE_SECRET_KEY
+  ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2025-08-27.basil" })
+  : (null as any);
 
 // Middleware to check subscription status for premium features
 const requireSubscriptionOrFreeTrial = async (req: any, res: any, next: any) => {
   try {
     const userId = req.user.claims.sub;
     const user = await storage.getUser(userId);
-    
+
     if (!user) {
       return res.status(404).json({ message: "User not found" });
+    }
+
+    // Admins are exempt from subscription checks
+    if ((user.role || '').toLowerCase() === 'admin') {
+      return next();
     }
 
     // Check if user has active subscription
@@ -40,8 +45,13 @@ const requireSubscriptionOrFreeTrial = async (req: any, res: any, next: any) => 
       code: "SUBSCRIPTION_REQUIRED",
       freeDownloadsUsed: user.freeDownloadsUsed 
     });
-    
-  } catch (error) {
+
+  } catch (error: any) {
+    const msg = (error?.message || '').toString();
+    // If DB is unavailable, allow access in local mode
+    if (msg.includes('DATABASE_URL is not set')) {
+      return next();
+    }
     console.error("Error checking subscription:", error);
     res.status(500).json({ message: "Failed to check subscription status" });
   }
@@ -57,7 +67,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.claims.sub;
       const user = await storage.getUser(userId);
       res.json(user);
-    } catch (error) {
+    } catch (error: any) {
+      const msg = (error?.message || '').toString();
+      if (msg.includes('DATABASE_URL is not set')) {
+        // Fallback: synthesize a minimal admin user from session claims for local debugging
+        const claims = req.user?.claims || {};
+        return res.json({
+          id: claims.sub || 'local-admin',
+          email: claims.email || 'admin@local',
+          firstName: claims.first_name || 'Admin',
+          lastName: claims.last_name || 'Local',
+          role: 'admin',
+          hasActiveSubscription: true,
+          freeDownloadsUsed: 0,
+        });
+      }
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
     }
@@ -423,6 +447,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "User not found" });
       }
 
+      // Admin bypass
+      if ((user.role || '').toLowerCase() === 'admin') {
+        return res.json({ canGenerate: true, hasActiveSubscription: true, freeDownloadsUsed: 0, isFreeTrial: false });
+      }
+
       const canGenerate = user.hasActiveSubscription || user.freeDownloadsUsed === 0;
       
       res.json({ 
@@ -431,7 +460,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         freeDownloadsUsed: user.freeDownloadsUsed,
         isFreeTrial: user.freeDownloadsUsed === 0 && !user.hasActiveSubscription
       });
-    } catch (error) {
+    } catch (error: any) {
+      const msg = (error?.message || '').toString();
+      if (msg.includes('DATABASE_URL is not set')) {
+        // Local mode: allow
+        return res.json({ canGenerate: true, hasActiveSubscription: true, freeDownloadsUsed: 0, isFreeTrial: false });
+      }
       console.error("Error checking PDF access:", error);
       res.status(500).json({ message: "Failed to check PDF access" });
     }
@@ -471,6 +505,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Stripe subscription routes
   app.post('/api/get-or-create-subscription', isAuthenticated, async (req: any, res) => {
     try {
+      if (!stripe) {
+        return res.status(503).json({ error: 'Stripe is not configured' });
+      }
       const userId = req.user.claims.sub;
       const userEmail = req.user.claims.email;
       let user = await storage.getUser(userId);
@@ -527,6 +564,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post('/api/create-customer-portal', isAuthenticated, async (req: any, res) => {
     try {
+      if (!stripe) {
+        return res.status(503).json({ error: 'Stripe is not configured' });
+      }
       const userId = req.user.claims.sub;
       const user = await storage.getUser(userId);
 
@@ -549,6 +589,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Stripe webhook endpoint to handle subscription events  
   app.use('/webhook/stripe', express.raw({ type: 'application/json' }));
   app.post('/webhook/stripe', async (req, res) => {
+    if (!stripe) {
+      return res.status(503).json({ error: 'Stripe is not configured' });
+    }
     const sig = req.headers['stripe-signature'];
     let event;
 

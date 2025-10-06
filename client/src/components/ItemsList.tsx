@@ -2,6 +2,8 @@ import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Plus, Trash2, Package } from "lucide-react";
 
@@ -12,6 +14,10 @@ interface QuoteItem {
   owned_quantity: number;
   buy_quantity: number;
   total: number;
+  // New fields for advanced calculations
+  item_type?: 'material' | 'service';
+  discount_type?: 'percent' | 'fixed';
+  discount_value?: number; // percent or BRL based on type
 }
 
 interface ItemsListProps {
@@ -28,7 +34,10 @@ export default function ItemsList({ items, onChange, disabled }: ItemsListProps)
       needed_quantity: 1, 
       owned_quantity: 0,
       buy_quantity: 1,
-      total: 0 
+      total: 0,
+      item_type: 'material',
+      discount_type: 'percent',
+      discount_value: 0,
     }];
     onChange(newItems);
   };
@@ -42,15 +51,25 @@ export default function ItemsList({ items, onChange, disabled }: ItemsListProps)
     const newItems = [...items];
     newItems[index] = { ...newItems[index], [field]: value };
     
-    // Calculate buy_quantity and total
-    if (field === 'needed_quantity' || field === 'owned_quantity' || field === 'unit_price') {
-      const needed = newItems[index].needed_quantity || 0;
-      const owned = newItems[index].owned_quantity || 0;
-      const buyQty = Math.max(0, needed - owned);
-      
-      newItems[index].buy_quantity = buyQty;
-      newItems[index].total = buyQty * (newItems[index].unit_price || 0);
+    // Recalculate derived quantities and totals
+    const needed = newItems[index].needed_quantity || 0;
+    const owned = newItems[index].owned_quantity || 0;
+    const unitPrice = newItems[index].unit_price || 0;
+    const buyQty = Math.max(0, needed - owned);
+    newItems[index].buy_quantity = buyQty;
+
+    const baseTotal = buyQty * unitPrice;
+    const discountType = (newItems[index].discount_type || 'percent');
+    const discountValue = Number(newItems[index].discount_value || 0);
+    let discountAmount = 0;
+    if (discountValue > 0) {
+      if (discountType === 'percent') {
+        discountAmount = baseTotal * (discountValue / 100);
+      } else {
+        discountAmount = Math.min(discountValue, baseTotal);
+      }
     }
+    newItems[index].total = Math.max(0, baseTotal - discountAmount);
     
     onChange(newItems);
   };
@@ -80,13 +99,16 @@ export default function ItemsList({ items, onChange, disabled }: ItemsListProps)
           <Table>
             <TableHeader>
               <TableRow className="bg-gray-50">
-                <TableHead className="w-[25%]">Item</TableHead>
-                <TableHead className="w-[15%] text-right">Preço</TableHead>
+                <TableHead className="w-[20%]">Item</TableHead>
+                <TableHead className="w-[10%]">Tipo</TableHead>
+                <TableHead className="w-[12%] text-right">Preço Base</TableHead>
                 <TableHead className="w-[10%] text-right">Necessário</TableHead>
                 <TableHead className="w-[10%] text-right">Já Tenho</TableHead>
                 <TableHead className="w-[10%] text-right">Comprar</TableHead>
-                <TableHead className="w-[15%] text-right">Total</TableHead>
-                <TableHead className="w-[15%] text-right">A Pagar</TableHead>
+                <TableHead className="w-[12%] text-right">Subtotal</TableHead>
+                <TableHead className="w-[11%]">Desc. Tipo</TableHead>
+                <TableHead className="w-[10%] text-right">Valor Desc.</TableHead>
+                <TableHead className="w-[12%] text-right">A Pagar</TableHead>
                 <TableHead className="w-[5%] text-center">Ações</TableHead>
               </TableRow>
             </TableHeader>
@@ -112,6 +134,20 @@ export default function ItemsList({ items, onChange, disabled }: ItemsListProps)
                           disabled={disabled}
                           data-testid={`input-item-description-${index}`}
                         />
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={item.item_type || 'material'}
+                          onValueChange={(val) => updateItem(index, 'item_type', val)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Tipo" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="material">Material</SelectItem>
+                            <SelectItem value="service">Serviço</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </TableCell>
                       <TableCell>
                         <div className="relative">
@@ -161,9 +197,35 @@ export default function ItemsList({ items, onChange, disabled }: ItemsListProps)
                         </span>
                       </TableCell>
                       <TableCell className="text-right">
-                        <span className="font-medium" data-testid={`text-item-total-${index}`}>
+                        <span className="font-medium" data-testid={`text-item-subtotal-${index}`}>
                           R$ {totalNecessario.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </span>
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={item.discount_type || 'percent'}
+                          onValueChange={(val) => updateItem(index, 'discount_type', val)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Tipo" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="percent">%</SelectItem>
+                            <SelectItem value="fixed">R$</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={item.discount_value || 0}
+                          onChange={(e) => updateItem(index, 'discount_value', parseFloat(e.target.value) || 0)}
+                          className="text-right"
+                          disabled={disabled}
+                          data-testid={`input-item-discount-${index}`}
+                        />
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="space-y-1">
