@@ -35,12 +35,12 @@ export const generateQuotePDF = async (quote: Quote) => {
     const accessData = await accessResponse.json();
     
     if (!accessData.canGenerate) {
-      // User has exceeded free trial and needs subscription
+      // Subscription required
       return { 
         success: false, 
         requiresSubscription: true,
         freeDownloadsUsed: accessData.freeDownloadsUsed,
-        message: 'Você já utilizou seu download gratuito. Assine o plano para continuar gerando PDFs.'
+        message: 'Assinatura necessária para gerar PDFs.'
       };
     }
     

@@ -21,11 +21,9 @@ import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { Link } from "wouter";
 
-// Load Stripe
-if (!import.meta.env.VITE_STRIPE_PUBLIC_KEY) {
-  throw new Error('Missing required Stripe key: VITE_STRIPE_PUBLIC_KEY');
-}
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY);
+// Load Stripe using the provided publishable key via Vite env
+const stripePublicKey = (import.meta.env.VITE_STRIPE_PUBLIC_KEY || import.meta.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) as string;
+const stripePromise = loadStripe(stripePublicKey);
 
 const SubscriptionForm = ({ clientSecret, onSuccess }: { clientSecret: string, onSuccess: () => void }) => {
   const stripe = useStripe();

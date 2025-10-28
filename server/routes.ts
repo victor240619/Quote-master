@@ -10,11 +10,55 @@ if (!process.env.STRIPE_SECRET_KEY) {
   throw new Error('Missing required Stripe secret: STRIPE_SECRET_KEY');
 }
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2025-08-27.basil",
-});
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-// Middleware to check subscription status for premium features
+// Ensure we have a recurring monthly price. If STRIPE_PRICE_ID is not provided,
+// we will create (or reuse) a price with a known lookup_key.
+const ensureRecurringPrice = async (): Promise<string> => {
+  if (process.env.STRIPE_PRICE_ID && process.env.STRIPE_PRICE_ID.trim().length > 0) {
+    return process.env.STRIPE_PRICE_ID;
+  }
+
+  const lookupKey = "quotemaster_pro_monthly_brl_3000";
+
+  // Try to find an existing active price by lookup_key
+  try {
+    // Stripe search endpoint; if not available, fall back to list and filter
+    // @ts-ignore - types for search can lag versions
+    const search = await (stripe.prices as any).search?.({
+      query: `active:'true' AND lookup_key:'${lookupKey}'`,
+      limit: 1,
+    });
+    if (search && search.data && search.data.length > 0) {
+      return search.data[0].id;
+    }
+  } catch {
+    // ignore and fallback to list
+  }
+
+  const list = await stripe.prices.list({ active: true, limit: 100 });
+  const found = list.data.find((p) => p.lookup_key === lookupKey);
+  if (found) {
+    return found.id;
+  }
+
+  // Create product if needed
+  const product = await stripe.products.create({
+    name: "QuoteMaster Pro",
+  });
+
+  const price = await stripe.prices.create({
+    product: product.id,
+    currency: "brl",
+    unit_amount: 3000, // R$ 30,00
+    recurring: { interval: "month" },
+    lookup_key: lookupKey,
+  });
+
+  return price.id;
+};
+
+// Middleware to require active subscription (no free trial)
 const requireSubscriptionOrFreeTrial = async (req: any, res: any, next: any) => {
   try {
     const userId = req.user.claims.sub;
@@ -24,21 +68,14 @@ const requireSubscriptionOrFreeTrial = async (req: any, res: any, next: any) => 
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Check if user has active subscription
+    // Require active subscription only
     if (user.hasActiveSubscription) {
       return next();
     }
 
-    // Check if user still has free downloads available (first download is free)
-    if (user.freeDownloadsUsed === 0) {
-      return next();
-    }
-
-    // User has used free trial and doesn't have active subscription
     return res.status(402).json({ 
       message: "Subscription required",
-      code: "SUBSCRIPTION_REQUIRED",
-      freeDownloadsUsed: user.freeDownloadsUsed 
+      code: "SUBSCRIPTION_REQUIRED"
     });
     
   } catch (error) {
@@ -48,6 +85,16 @@ const requireSubscriptionOrFreeTrial = async (req: any, res: any, next: any) => 
 };
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Parse JSON for all routes except the Stripe webhook (needs raw body)
+  app.use((req, res, next) => {
+    if (req.path === '/webhook/stripe') return next();
+    return (express.json())(req, res, next);
+  });
+  app.use((req, res, next) => {
+    if (req.path === '/webhook/stripe') return next();
+    return (express.urlencoded({ extended: false }))(req, res, next);
+  });
+
   // Auth middleware
   await setupAuth(app);
 
@@ -423,13 +470,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "User not found" });
       }
 
-      const canGenerate = user.hasActiveSubscription || user.freeDownloadsUsed === 0;
+      const canGenerate = user.hasActiveSubscription;
       
       res.json({ 
         canGenerate,
         hasActiveSubscription: user.hasActiveSubscription,
         freeDownloadsUsed: user.freeDownloadsUsed,
-        isFreeTrial: user.freeDownloadsUsed === 0 && !user.hasActiveSubscription
+        isFreeTrial: false
       });
     } catch (error) {
       console.error("Error checking PDF access:", error);
@@ -437,7 +484,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Endpoint to track PDF generation (increment free downloads counter)
+  // Endpoint to track PDF generation (subscription required)
   app.post('/api/track-pdf-download', isAuthenticated, requireSubscriptionOrFreeTrial, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
@@ -447,21 +494,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "User not found" });
       }
 
-      // If it's a free trial user (first download), increment the counter
-      if (!user.hasActiveSubscription && user.freeDownloadsUsed === 0) {
-        await storage.incrementFreeDownloads(userId);
-        res.json({ 
-          success: true, 
-          message: "Free trial used. Subscribe to continue generating PDFs.",
-          freeDownloadsUsed: 1
-        });
-      } else {
-        res.json({ 
-          success: true, 
-          message: "PDF generated successfully",
-          freeDownloadsUsed: user.freeDownloadsUsed
-        });
-      }
+      // Subscription required; simply acknowledge
+      res.json({ 
+        success: true, 
+        message: "PDF generated successfully",
+        freeDownloadsUsed: user.freeDownloadsUsed
+      });
     } catch (error) {
       console.error("Error tracking PDF download:", error);
       res.status(500).json({ message: "Failed to track PDF download" });
@@ -499,10 +537,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         user = await storage.updateUserStripeInfo(userId, customer.id);
 
+        const priceId = await ensureRecurringPrice();
+
         const subscription = await stripe.subscriptions.create({
           customer: customer.id,
           items: [{
-            price: process.env.STRIPE_PRICE_ID || 'price_1234567890',
+            price: priceId,
           }],
           payment_behavior: 'default_incomplete',
           expand: ['latest_invoice.payment_intent'],
@@ -546,9 +586,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Stripe webhook endpoint to handle subscription events  
-  app.use('/webhook/stripe', express.raw({ type: 'application/json' }));
-  app.post('/webhook/stripe', async (req, res) => {
+  // Stripe webhook endpoint to handle subscription events
+  // Note: this route must receive the raw body for signature verification
+  app.post('/webhook/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
 
