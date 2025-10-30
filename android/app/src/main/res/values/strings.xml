@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Quote</string>
+    <string name="title_activity_main">Quote</string>
+    <string name="package_name">com.quote.master</string>
+    <string name="custom_url_scheme">com.quote.master</string>
+</resources>
